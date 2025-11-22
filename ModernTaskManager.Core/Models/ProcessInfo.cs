@@ -1,4 +1,4 @@
-﻿// En: ModernTaskManager.Core/Models/ProcessInfo.cs
+﻿// ModernTaskManager.Core/Models/ProcessInfo.cs
 
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -14,6 +14,9 @@ namespace ModernTaskManager.Core.Models
 
     public class ProcessInfo : INotifyPropertyChanged
     {
+        // -----------------------------
+        // CAMPOS PRIVADOS PARA BINDING
+        // -----------------------------
         private int _pid;
         private string _name = string.Empty;
         private string _username = string.Empty;
@@ -22,18 +25,19 @@ namespace ModernTaskManager.Core.Models
         private long _readOperations;
         private long _writeOperations;
         private double _cpuUsage;
-
         private long _diskReadSpeed;
         private long _diskWriteSpeed;
-
         private ProcessCategory _category;
         private string _mainWindowTitle = string.Empty;
 
-        // *** ¡NUEVOS CAMPOS! ***
+        // Nuevos campos
         private string _architecture = string.Empty;
-        private string _commandLine = string.Empty;  // Ej: "chrome.exe --type=renderer..."
+        private string _commandLine = string.Empty;
+        private IntPtr _iconHandle;
 
-        // --- PROPIEDADES PÚBLICAS ---
+        // -----------------------------
+        // PROPIEDADES PÚBLICAS
+        // -----------------------------
 
         public string Architecture
         {
@@ -119,6 +123,14 @@ namespace ModernTaskManager.Core.Models
             set => SetProperty(ref _diskWriteSpeed, value);
         }
 
+        public IntPtr IconHandle
+        {
+            get => _iconHandle;
+            set => SetProperty(ref _iconHandle, value);
+        }
+
+        // Estas propiedades no estaban implementadas con SetProperty antes,
+        // si deseas que también notifiquen, puedo agregarlas.
         public int ThreadCount { get; set; }
         public int HandleCount { get; set; }
 
@@ -128,17 +140,22 @@ namespace ModernTaskManager.Core.Models
         public long DiskReadBytes { get; set; }
         public long DiskWriteBytes { get; set; }
 
+
+        // -----------------------------
+        // INotifyPropertyChanged
+        // -----------------------------
+
         public event PropertyChangedEventHandler? PropertyChanged;
 
         protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
-        {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        }
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-        protected bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string propertyName = "")
+        protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string propertyName = "")
         {
-            if (Equals(storage, value)) return false;
-            storage = value;
+            if (Equals(field, value))
+                return false;
+
+            field = value;
             OnPropertyChanged(propertyName);
             return true;
         }

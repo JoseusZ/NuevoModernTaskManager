@@ -40,13 +40,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="Helpers\ByteFormatHelper.cs" />
     <Compile Include="Helpers\PerfCounterHelper.cs" />
     <Compile Include="Helpers\SystemInfoHelper.cs" />
     <Compile Include="Helpers\WindowHelper.cs" />
     <Compile Include="Models\ProcessInfo.cs" />
     <Compile Include="Models\ServiceInfo.cs" />
     <Compile Include="Native\D3DKMT.cs" />
+    <Compile Include="Native\DXGIWrapper.cs" />
+    <Compile Include="Native\IconHelper.cs" />
     <Compile Include="Native\User32.cs" />
+    <Compile Include="Services\GpuEngineAggregator.cs" />
+    <Compile Include="Services\HardwareInfoService.cs" />
     <Compile Include="Services\WindowsServiceManager.cs" />
     <Compile Include="Native\AdvApi32.cs" />
     <Compile Include="Native\Kernel32.cs" />
@@ -54,6 +59,7 @@
     <Compile Include="Services\PerformanceService.cs" />
     <Compile Include="Services\ProcessService.cs" />
     <Compile Include="Services\SystemMonitor.cs" />
+    <Compile Include="Helpers\WindowsVersion.cs" />
   </ItemGroup>
 
   <ItemGroup>

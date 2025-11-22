@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Threading;
+using ModernTaskManager.Core.Helpers;
 using ModernTaskManager.Core.Models;
 using ModernTaskManager.Core.Services;
 
@@ -10,8 +11,8 @@ namespace ModernTaskManager.Tests
     {
         static void Main(string[] args)
         {
-            // Intentar hacer la consola un poco más ancha para ver los títulos
-            try { Console.WindowWidth = 120; } catch { }
+            // Intentar hacer la consola un poco más ancha para ver los títulos largos
+            try { Console.WindowWidth = 150; } catch { }
 
             Console.CursorVisible = false;
             Console.WriteLine("Iniciando Motor de Monitorización... (Calentando 1 seg)");
@@ -26,6 +27,9 @@ namespace ModernTaskManager.Tests
                     Thread.Sleep(1000);
                     Console.Clear();
 
+                    // Pruebas de autodiagnóstico para GPU
+                    GpuSelfTests.RunAll();
+
                     while (!Console.KeyAvailable)
                     {
                         // --- 1. ACTUALIZAR DATOS ---
@@ -33,48 +37,45 @@ namespace ModernTaskManager.Tests
                         MemoryUsageInfo memInfo = perfService.GetMemoryUsage();
                         DiskUsageInfo diskInfo = perfService.GetDiskUsage();
                         NetworkUsageInfo netInfo = perfService.GetNetworkUsage();
-
-                        // ¡NUEVO! Obtener datos de GPU
-                        GpuUsageInfo gpuInfo = perfService.GetGpuUsage();
+                        GpuUsageInfo gpuInfo = perfService.GetGpuUsage(); // ¡NUEVO!
 
                         monitor.Update(); // Recalcula CPU, Disco y Agrupación
 
                         // --- 2. DIBUJAR CABECERA (Rendimiento Global) ---
                         Console.SetCursorPosition(0, 0);
                         Console.WriteLine("--- MODERN TASK MANAGER (CORE BACKEND TEST) --- [Presiona tecla para salir]");
-                        Console.WriteLine(new string('=', 118));
+                        Console.WriteLine(new string('=', 148));
 
                         // CPU
                         DrawBar("CPU Total", globalCpu, 100.0, "");
 
-                        // RAM
-                        string ramText = $"{FormatBytes(memInfo.UsedPhysicalBytes)} / {FormatBytes(memInfo.TotalPhysicalBytes)} (Carga: {memInfo.UsedPercentage:F0}%)";
+                        // RAM (Detallada)
+                        string ramText = $"{ByteFormatHelper.Format(memInfo.UsedPhysicalBytes)} / {ByteFormatHelper.Format(memInfo.TotalPhysicalBytes)} (Uso: {memInfo.UsedPercentage:F0}%)";
                         DrawBar("RAM Física", memInfo.UsedPercentage, 100.0, ramText);
-                        Console.WriteLine($"      -> Confirmada: {FormatBytes(memInfo.CommittedBytes)} / {FormatBytes(memInfo.CommitLimit)}");
+                        Console.WriteLine($"      -> Confirmada: {ByteFormatHelper.Format(memInfo.CommittedBytes)} / {ByteFormatHelper.Format(memInfo.CommitLimit)}");
 
                         // Disco
                         DrawBar("Disco Act.", diskInfo.ActiveTimePercent, 100.0,
-                            $"L: {FormatBytes(diskInfo.ReadBytesPerSec)}/s | E: {FormatBytes(diskInfo.WriteBytesPerSec)}/s");
+                            $"L: {ByteFormatHelper.Format((ulong)diskInfo.ReadBytesPerSec)}/s | E: {ByteFormatHelper.Format((ulong)diskInfo.WriteBytesPerSec)}/s");
 
                         // Red
-                        double maxNet = netInfo.BandwidthBytesPerSec > 0 ? netInfo.BandwidthBytesPerSec : (100 * 1024 * 1024 / 8);
-                        double netPercent = (netInfo.TotalBytesPerSec / maxNet) * 100.0;
+                        double maxNet = netInfo.BandwidthBytesPerSec > 0 ? netInfo.BandwidthBytesPerSec : (100 * 1024 * 1024 / 8); // ~100 Mbps fallback
+                        double netPercent = (maxNet > 0) ? (netInfo.TotalBytesPerSec / maxNet) * 100.0 : 0;
                         DrawBar("Red Total", Math.Min(100, netPercent), 100.0,
-                            $"Sub: {FormatBytes(netInfo.BytesSentPerSec)}/s | Baj: {FormatBytes(netInfo.BytesReceivedPerSec)}/s | Cap: {FormatBytes(maxNet)}/s");
+                            $"Sub: {ByteFormatHelper.Format(netInfo.BytesSentPerSec)}/s | Baj: {ByteFormatHelper.Format(netInfo.BytesReceivedPerSec)}/s | Cap: {ByteFormatHelper.Format(maxNet)}/s");
 
-                        // ¡NUEVO! GPU
-                        string vramText = $"{FormatBytes(gpuInfo.DedicatedMemoryUsed)} / {FormatBytes(gpuInfo.DedicatedMemoryTotal)}";
-                        // Calculamos % de VRAM solo si tenemos el total
+                        // GPU (¡NUEVO!)
+                        string vramText = $"{ByteFormatHelper.Format(gpuInfo.DedicatedMemoryUsed)} / {ByteFormatHelper.Format(gpuInfo.DedicatedMemoryTotal)}";
                         double vramPercent = (gpuInfo.DedicatedMemoryTotal > 0) ? (double)gpuInfo.DedicatedMemoryUsed / gpuInfo.DedicatedMemoryTotal * 100.0 : 0;
-
                         DrawBar("GPU 3D", gpuInfo.GpuUsagePercent, 100.0, $"VRAM: {vramText} ({vramPercent:F0}%)");
 
-                        Console.WriteLine(new string('-', 118));
+                        Console.WriteLine(new string('-', 148));
 
-                        // --- 3. DIBUJAR LISTA ---
-                        Console.WriteLine("{0,-6} {1,-25} {2,-6} {3,-12} {4,-4} {5}",
-                            "PID", "Nombre", "CPU%", "Disk/s", "Tipo", "Detalle (Título / Usuario)");
-                        Console.WriteLine(new string('-', 118));
+                        // --- 3. DIBUJAR LISTA DE PROCESOS ---
+                        // Nuevas columnas: Arq (x64/x86) y CmdLine (truncada)
+                        Console.WriteLine("{0,-6} {1,-25} {2,-5} {3,-6} {4,-12} {5,-4} {6}",
+                            "PID", "Nombre", "Arq", "CPU%", "Disk/s", "Tipo", "Detalle (Título / CmdLine / Usuario)");
+                        Console.WriteLine(new string('-', 148));
 
                         int count = 0;
                         var topProcesses = monitor.Processes
@@ -84,30 +85,38 @@ namespace ModernTaskManager.Tests
 
                         foreach (var p in topProcesses)
                         {
-                            string diskSpeed = FormatBytes(p.DiskReadSpeed + p.DiskWriteSpeed) + "/s";
+                            string diskSpeed = ByteFormatHelper.Format((ulong)(p.DiskReadSpeed + p.DiskWriteSpeed)) + "/s";
                             string category = p.Category == ProcessCategory.Application ? "APP" : "BG";
 
-                            string detail = p.Category == ProcessCategory.Application
-                                ? (string.IsNullOrEmpty(p.MainWindowTitle) ? p.Name : p.MainWindowTitle)
-                                : p.Username;
+                            // Lógica de visualización de detalle:
+                            // 1. Si es APP, muestra el Título de Ventana.
+                            // 2. Si es BG, intenta mostrar la Línea de Comandos (si existe).
+                            // 3. Si no, muestra el Usuario.
+                            string detail = p.Username;
+                            if (p.Category == ProcessCategory.Application && !string.IsNullOrEmpty(p.MainWindowTitle))
+                                detail = $"[Ventana] {p.MainWindowTitle}";
+                            else if (!string.IsNullOrEmpty(p.CommandLine))
+                                detail = $"[Cmd] {p.CommandLine}";
 
                             if (p.Category == ProcessCategory.Application) Console.ForegroundColor = ConsoleColor.Cyan;
                             else Console.ForegroundColor = ConsoleColor.Gray;
 
-                            string line = string.Format("{0,-6} {1,-25} {2,-6:F1} {3,-12} {4,-4} {5}",
+                            string line = string.Format("{0,-6} {1,-25} {2,-5} {3,-6:F1} {4,-12} {5,-4} {6}",
                                 p.Pid,
                                 Truncate(p.Name, 24),
+                                p.Architecture, // ¡Nueva columna!
                                 p.CpuUsage,
                                 diskSpeed,
                                 category,
-                                Truncate(detail, 55));
+                                Truncate(detail, 80)); // Más espacio para ver la línea de comandos
 
-                            Console.WriteLine(line.PadRight(118));
+                            Console.WriteLine(line.PadRight(148));
                             count++;
                         }
 
                         Console.ResetColor();
-                        for (int i = count; i < 20; i++) Console.WriteLine(new string(' ', 118));
+
+                        for (int i = count; i < 20; i++) Console.WriteLine(new string(' ', 148));
 
                         Thread.Sleep(1000);
                     }
@@ -150,14 +159,6 @@ namespace ModernTaskManager.Tests
 
             Console.Write($"] {value,5:F1}%  {label}");
             Console.WriteLine();
-        }
-
-        private static string FormatBytes(double bytes)
-        {
-            if (bytes >= 1024 * 1024 * 1024) return $"{bytes / (1024 * 1024 * 1024):F1} GB";
-            if (bytes >= 1024 * 1024) return $"{bytes / (1024 * 1024):F1} MB";
-            if (bytes >= 1024) return $"{bytes / 1024:F0} KB";
-            return $"{bytes:F0} B";
         }
     }
 }
