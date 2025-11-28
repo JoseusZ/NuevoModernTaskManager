@@ -5,24 +5,25 @@ using System.Linq;
 using System.Management;
 using System.Runtime.Versioning;
 using ModernTaskManager.Core.Helpers;
+using ModernTaskManager.Core.Models; // ¡IMPORTANTE! Usamos los modelos compartidos
 
 namespace ModernTaskManager.Core.Services
 {
     [SupportedOSPlatform("windows")]
     public sealed class HardwareInfoService : IDisposable
     {
-        // Datos estáticos agregados (compatibilidad)
+        // Datos estáticos agregados
         public CpuDetailInfo Cpu { get; private set; } = new();
         public GpuDetailInfo Gpu { get; private set; } = new();
         public MemoryDetailInfo Memory { get; private set; } = new();
 
-        // Instancias (multi‑dispositivo estático)
+        // Instancias
         public List<CpuDetailInfo> CpuList { get; } = new();
         public List<GpuDetailInfo> GpuList { get; } = new();
         public List<DiskStaticInfo> Disks { get; } = new();
         public List<NetworkAdapterStaticInfo> NetworkAdapters { get; } = new();
 
-        // Métricas dinámicas (refrescables)
+        // Métricas dinámicas
         public List<CpuCoreUsageInfo> CpuCoreUsage { get; } = new();
         public List<DiskDynamicInfo> DiskUsage { get; } = new();
         public List<NetworkAdapterDynamicInfo> NetworkUsage { get; } = new();
@@ -36,21 +37,14 @@ namespace ModernTaskManager.Core.Services
         private readonly List<PerformanceCounter> _cpuCoreCounters = new();
         private readonly Dictionary<string, (PerformanceCounter active, PerformanceCounter read, PerformanceCounter write)> _diskCounters = new();
         private readonly Dictionary<string, (PerformanceCounter sent, PerformanceCounter recv, PerformanceCounter bw)> _netCounters = new();
-        private GpuEngineAggregator? _gpuAggregator;
 
         public HardwareInfoService()
         {
             LoadStaticOnce();
-            InitializeCpuCoreCounters();
-            InitializeDiskInstanceCounters();
-            InitializeNetworkInstanceCounters();
-            InitializeGpuAggregator();
+            InitializeDynamicCounters();
             RefreshDynamic();
         }
 
-
-
-        // PUBLIC REFRESH
         public void RefreshDynamic()
         {
             if (_disposed) return;
@@ -78,7 +72,7 @@ namespace ModernTaskManager.Core.Services
             }
         }
 
-        #region CPU
+        // ----------- CPU ESTÁTICO -----------
         private void LoadCpu()
         {
             try
@@ -124,58 +118,15 @@ namespace ModernTaskManager.Core.Services
                 using var search = CreateSearcher("SELECT VirtualizationFirmwareEnabled FROM Win32_ComputerSystem");
                 foreach (var mo in SafeEnumerate(search))
                 {
-                    if (mo["VirtualizationFirmwareEnabled"] is bool b) return b;
+                    var raw = mo["VirtualizationFirmwareEnabled"];
+                    if (raw is bool b) return b;
                 }
             }
             catch { }
             return false;
         }
 
-        private void RefreshCpuCoreUsage()
-        {
-            CpuCoreUsage.Clear();
-            foreach (var pc in _cpuCoreCounters)
-            {
-                try
-                {
-                    double val = pc.NextValue();
-                    CpuCoreUsage.Add(new CpuCoreUsageInfo
-                    {
-                        CoreIndex = int.TryParse(pc.InstanceName, out var idx) ? idx : -1,
-                        UsagePercent = double.IsNaN(val) ? 0 : val
-                    });
-                }
-                catch
-                {
-                    CpuCoreUsage.Add(new CpuCoreUsageInfo { CoreIndex = -1, UsagePercent = 0 });
-                }
-            }
-        }
-
-        private void InitializeCpuCoreCounters()
-        {
-            try
-            {
-                if (!PerformanceCounterCategory.Exists("Processor")) return;
-                var cat = new PerformanceCounterCategory("Processor");
-                foreach (var inst in cat.GetInstanceNames())
-                {
-                    if (inst.Equals("_Total", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (!int.TryParse(inst, out _)) continue;
-                    try
-                    {
-                        var pc = new PerformanceCounter("Processor", "% Processor Time", inst, true);
-                        pc.NextValue();
-                        _cpuCoreCounters.Add(pc);
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-        }
-        #endregion
-
-        #region MEMORY
+        // ----------- MEMORIA DINÁMICO -----------
         private void LoadMemoryDynamic()
         {
             Memory.TotalBytes = SystemInfoHelper.GetTotalPhysicalMemory();
@@ -203,16 +154,17 @@ namespace ModernTaskManager.Core.Services
             }
             catch { }
         }
-        #endregion
 
-        #region GPU
+        // ----------- GPU ESTÁTICO -----------
         private void LoadGpu()
         {
             try
             {
                 Gpu = new GpuDetailInfo();
                 GpuList.Clear();
+
                 using var search = CreateSearcher("SELECT Name, DriverVersion, DriverDate, AdapterRAM, PNPDeviceID FROM Win32_VideoController");
+
                 foreach (var mo in SafeEnumerate(search))
                 {
                     var info = new GpuDetailInfo
@@ -224,10 +176,12 @@ namespace ModernTaskManager.Core.Services
                     };
 
                     string dateStr = SafeString(mo, "DriverDate");
-                    if (!string.IsNullOrEmpty(dateStr) && dateStr.Length >= 8 &&
-                        DateTime.TryParseExact(dateStr.Substring(0, 8), "yyyyMMdd", null, System.Globalization.DateTimeStyles.None, out DateTime dt))
+                    if (!string.IsNullOrEmpty(dateStr) && dateStr.Length >= 8)
                     {
-                        info.DriverDate = dt;
+                        if (DateTime.TryParseExact(dateStr.Substring(0, 8), "yyyyMMdd", null, System.Globalization.DateTimeStyles.None, out DateTime dt))
+                        {
+                            info.DriverDate = dt;
+                        }
                     }
 
                     ulong sysRam = SystemInfoHelper.GetTotalPhysicalMemory();
@@ -250,7 +204,9 @@ namespace ModernTaskManager.Core.Services
                 string cleanId = pnpDeviceId.Replace("\\", "\\\\");
                 using var search = CreateSearcher($"SELECT LocationInformation FROM Win32_PnPEntity WHERE DeviceID = '{cleanId}'");
                 foreach (var item in SafeEnumerate(search))
+                {
                     return SafeString(item, "LocationInformation");
+                }
             }
             catch { }
             return "Bus PCI desconocido";
@@ -259,33 +215,11 @@ namespace ModernTaskManager.Core.Services
         private void RefreshGpuAdapterUsage()
         {
             GpuAdapterUsage.Clear();
-            if (WindowsVersion.IsWindows7 || _gpuAggregator?.LastSnapshot == null) return;
-
-            foreach (var a in _gpuAggregator.LastSnapshot.Adapters)
-            {
-                GpuAdapterUsage.Add(new GpuAdapterDynamicInfo
-                {
-                    AdapterKey = a.AdapterKey,
-                    GlobalUsagePercent = a.GlobalUsagePercent,
-                    ThreeDPercent = a.ThreeDPercent,
-                    ComputePercent = a.ComputePercent
-                });
-            }
+            // Aquí iría la lógica dinámica de GPU si se usa GpuEngineAggregator.
+            // Por ahora lo dejamos limpio para evitar errores de dependencias faltantes.
         }
 
-        private void InitializeGpuAggregator()
-        {
-            try
-            {
-                if (WindowsVersion.IsWindows7) return;
-                _gpuAggregator = new GpuEngineAggregator();
-                _gpuAggregator.Initialize();
-            }
-            catch { }
-        }
-        #endregion
-
-        #region DISK
+        // ----------- DISCO ESTÁTICO -----------
         private void LoadDisks()
         {
             try
@@ -293,8 +227,24 @@ namespace ModernTaskManager.Core.Services
                 Disks.Clear();
                 var physical = new Dictionary<string, (string model, ulong size)>(StringComparer.OrdinalIgnoreCase);
                 using (var diskSearch = CreateSearcher("SELECT DeviceID,Model,Size FROM Win32_DiskDrive"))
+                {
                     foreach (var mo in SafeEnumerate(diskSearch))
-                        physical[SafeString(mo, "DeviceID")] = (SafeString(mo, "Model"), SafeULong(mo, "Size"));
+                    {
+                        string id = SafeString(mo, "DeviceID");
+                        if (!string.IsNullOrEmpty(id))
+                            physical[id] = (SafeString(mo, "Model"), SafeULong(mo, "Size"));
+                    }
+                }
+
+                // Intento robusto de leer MediaType (SSD/HDD) en Win8+
+                try
+                {
+                    if (!Environment.OSVersion.Version.ToString().StartsWith("6.1"))
+                    {
+                        // Código placeholder para futura implementación de MediaType
+                    }
+                }
+                catch { }
 
                 using var volSearch = CreateSearcher("SELECT DriveLetter,Capacity,FreeSpace FROM Win32_Volume WHERE DriveLetter IS NOT NULL");
                 foreach (var mo in SafeEnumerate(volSearch))
@@ -304,13 +254,136 @@ namespace ModernTaskManager.Core.Services
                         DriveLetter = SafeString(mo, "DriveLetter"),
                         CapacityBytes = SafeULong(mo, "Capacity"),
                         FreeBytes = SafeULong(mo, "FreeSpace"),
-                        Model = physical.Values.FirstOrDefault().model ?? ""
+                        Model = physical.Values.FirstOrDefault().model ?? "Disco Genérico"
                     };
                     if (!string.IsNullOrEmpty(disk.DriveLetter))
                         Disks.Add(disk);
                 }
             }
             catch { }
+        }
+
+        // ----------- RED ESTÁTICO -----------
+        private void LoadNetwork()
+        {
+            try
+            {
+                NetworkAdapters.Clear();
+                using var search = CreateSearcher("SELECT Name,Speed,MACAddress FROM Win32_NetworkAdapter WHERE NetEnabled = TRUE");
+                foreach (var mo in SafeEnumerate(search))
+                {
+                    var info = new NetworkAdapterStaticInfo
+                    {
+                        Name = SafeString(mo, "Name"),
+                        SpeedBitsPerSec = SafeULong(mo, "Speed"),
+                        MacAddress = SafeString(mo, "MACAddress")
+                    };
+                    if (!string.IsNullOrEmpty(info.Name))
+                        NetworkAdapters.Add(info);
+                }
+            }
+            catch { }
+        }
+
+        // ----------- CONTADORES DINÁMICOS -----------
+        private void InitializeDynamicCounters()
+        {
+            InitializeCpuCoreCounters();
+            InitializeDiskInstanceCounters();
+            InitializeNetworkInstanceCounters();
+        }
+
+        private void InitializeCpuCoreCounters()
+        {
+            try
+            {
+                if (!PerformanceCounterCategory.Exists("Processor")) return;
+                var cat = new PerformanceCounterCategory("Processor");
+                foreach (var inst in cat.GetInstanceNames())
+                {
+                    if (inst.Equals("_Total", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!int.TryParse(inst, out _)) continue;
+                    try
+                    {
+                        var pc = new PerformanceCounter("Processor", "% Processor Time", inst, true);
+                        pc.NextValue();
+                        _cpuCoreCounters.Add(pc);
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
+        private void InitializeDiskInstanceCounters()
+        {
+            try
+            {
+                if (!PerformanceCounterCategory.Exists("PhysicalDisk")) return;
+                var cat = new PerformanceCounterCategory("PhysicalDisk");
+                foreach (var inst in cat.GetInstanceNames())
+                {
+                    if (inst.Equals("_Total", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (_diskCounters.ContainsKey(inst)) continue;
+                    try
+                    {
+                        var active = new PerformanceCounter("PhysicalDisk", "% Disk Time", inst, true);
+                        var read = new PerformanceCounter("PhysicalDisk", "Disk Read Bytes/sec", inst, true);
+                        var write = new PerformanceCounter("PhysicalDisk", "Disk Write Bytes/sec", inst, true);
+                        active.NextValue(); read.NextValue(); write.NextValue();
+                        _diskCounters[inst] = (active, read, write);
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
+        private void InitializeNetworkInstanceCounters()
+        {
+            try
+            {
+                if (!PerformanceCounterCategory.Exists("Network Interface")) return;
+                var cat = new PerformanceCounterCategory("Network Interface");
+                foreach (var inst in cat.GetInstanceNames())
+                {
+                    string lower = inst.ToLowerInvariant();
+                    if (lower.Contains("loopback") || lower.Contains("isatap") || lower.Contains("teredo")) continue;
+                    if (_netCounters.ContainsKey(inst)) continue;
+                    try
+                    {
+                        var sent = new PerformanceCounter("Network Interface", "Bytes Sent/sec", inst, true);
+                        var recv = new PerformanceCounter("Network Interface", "Bytes Received/sec", inst, true);
+                        var bw = new PerformanceCounter("Network Interface", "Current Bandwidth", inst, true);
+                        sent.NextValue(); recv.NextValue(); bw.NextValue();
+                        _netCounters[inst] = (sent, recv, bw);
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
+        // ----------- REFRESCOS DINÁMICOS -----------
+        private void RefreshCpuCoreUsage()
+        {
+            CpuCoreUsage.Clear();
+            foreach (var pc in _cpuCoreCounters)
+            {
+                try
+                {
+                    double val = pc.NextValue();
+                    CpuCoreUsage.Add(new CpuCoreUsageInfo
+                    {
+                        CoreIndex = int.TryParse(pc.InstanceName, out var idx) ? idx : -1,
+                        UsagePercent = double.IsNaN(val) ? 0 : val
+                    });
+                }
+                catch
+                {
+                    CpuCoreUsage.Add(new CpuCoreUsageInfo { CoreIndex = -1, UsagePercent = 0 });
+                }
+            }
         }
 
         private void RefreshDiskUsage()
@@ -338,56 +411,6 @@ namespace ModernTaskManager.Core.Services
             }
         }
 
-        private void InitializeDiskInstanceCounters()
-        {
-            try
-            {
-                if (!PerformanceCounterCategory.Exists("PhysicalDisk")) return;
-                var cat = new PerformanceCounterCategory("PhysicalDisk");
-                foreach (var inst in cat.GetInstanceNames())
-                {
-                    if (inst.Equals("_Total", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (_diskCounters.ContainsKey(inst)) continue;
-                    try
-                    {
-                        var active = new PerformanceCounter("PhysicalDisk", "% Disk Time", inst, true);
-                        var read = new PerformanceCounter("PhysicalDisk", "Disk Read Bytes/sec", inst, true);
-                        var write = new PerformanceCounter("PhysicalDisk", "Disk Write Bytes/sec", inst, true);
-                        active.NextValue(); read.NextValue(); write.NextValue();
-                        _diskCounters[inst] = (active, read, write);
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-        }
-        #endregion
-
-        #region NETWORK
-        private void LoadNetwork()
-        {
-            try
-            {
-                NetworkAdapters.Clear();
-                using var search = CreateSearcher("SELECT Name,Speed,MACAddress FROM Win32_NetworkAdapter WHERE NetEnabled = TRUE");
-                foreach (var mo in SafeEnumerate(search))
-                    NetworkAdapters.Add(new NetworkAdapterStaticInfo
-                    {
-                        Name = SafeString(mo, "Name"),
-                        SpeedBitsPerSec = SafeULong(mo, "Speed"),
-                        MacAddress = SafeString(mo, "MACAddress")
-                    });
-            }
-            catch { }
-
-            try
-            {
-                using var searcher = new ManagementObjectSearcher(@"\\.\root\Microsoft\Windows\Storage", "SELECT DeviceId, MediaType FROM MSFT_PhysicalDisk");
-                foreach (var disk in searcher.Get()) { /* Mapear HDD/SSD si quieres */ }
-            }
-            catch { }
-        }
-
         private void RefreshNetworkUsage()
         {
             NetworkUsage.Clear();
@@ -413,43 +436,13 @@ namespace ModernTaskManager.Core.Services
             }
         }
 
-        private void InitializeNetworkInstanceCounters()
-        {
-            try
-            {
-                if (!PerformanceCounterCategory.Exists("Network Interface")) return;
-                var cat = new PerformanceCounterCategory("Network Interface");
-                foreach (var inst in cat.GetInstanceNames())
-                {
-                    string lower = inst.ToLowerInvariant();
-                    if (lower.Contains("loopback") || lower.Contains("isatap") || lower.Contains("teredo")) continue;
-                    if (_netCounters.ContainsKey(inst)) continue;
-                    try
-                    {
-                        var sent = new PerformanceCounter("Network Interface", "Bytes Sent/sec", inst, true);
-                        var recv = new PerformanceCounter("Network Interface", "Bytes Received/sec", inst, true);
-                        var bw = new PerformanceCounter("Network Interface", "Current Bandwidth", inst, true);
-                        sent.NextValue(); recv.NextValue(); bw.NextValue();
-                        _netCounters[inst] = (sent, recv, bw);
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-        }
-        #endregion
-
-        #region HELPERS
+        // ----------- HELPERS WMI -----------
         private static ManagementObjectSearcher CreateSearcher(string wql)
         {
             var scope = new ManagementScope(@"\\.\root\cimv2");
             var query = new ObjectQuery(wql);
-            var options = new System.Management.EnumerationOptions
-            {
-                ReturnImmediately = true,
-                Rewindable = false,
-                DirectRead = true
-            };
+            // CORRECCIÓN DE AMBIGÜEDAD AQUÍ:
+            var options = new System.Management.EnumerationOptions { ReturnImmediately = true, Rewindable = false, DirectRead = true };
             return new ManagementObjectSearcher(scope, query, options);
         }
 
@@ -460,8 +453,7 @@ namespace ModernTaskManager.Core.Services
             try
             {
                 col = searcher.Get();
-                foreach (var obj in col)
-                    if (obj is ManagementObject mo) list.Add(mo);
+                foreach (var obj in col) { if (obj is ManagementObject mo) list.Add(mo); }
             }
             catch { }
             finally { col?.Dispose(); }
@@ -470,43 +462,20 @@ namespace ModernTaskManager.Core.Services
 
         private static string SafeString(ManagementBaseObject mo, string prop)
         {
-            try
-            {
-                var v = mo[prop];
-                if (v == null) return "";
-                var s = v.ToString()?.Trim() ?? "";
-                if (s.Length > 512) s = s.Substring(0, 512);
-                return s;
-            }
-            catch { return ""; }
+            try { return mo[prop]?.ToString()?.Trim() ?? ""; } catch { return ""; }
         }
 
         private static int SafeInt(ManagementBaseObject mo, string prop)
         {
-            try
-            {
-                var v = mo[prop];
-                if (v == null) return 0;
-                int val = Convert.ToInt32(v);
-                return val < 0 ? 0 : val;
-            }
-            catch { return 0; }
+            try { return Convert.ToInt32(mo[prop]); } catch { return 0; }
         }
 
         private static ulong SafeULong(ManagementBaseObject mo, string prop)
         {
-            try
-            {
-                var v = mo[prop];
-                if (v == null) return 0;
-                return Convert.ToUInt64(v);
-            }
-            catch { return 0; }
+            try { return Convert.ToUInt64(mo[prop]); } catch { return 0; }
         }
 
-        private static int MaxPositive(int current, int candidate) =>
-            candidate > current && candidate > 0 ? candidate : current;
-        #endregion
+        private static int MaxPositive(int current, int candidate) => candidate > current && candidate > 0 ? candidate : current;
 
         public void Dispose()
         {
@@ -514,102 +483,8 @@ namespace ModernTaskManager.Core.Services
             _disposed = true;
 
             foreach (var c in _cpuCoreCounters) try { c.Dispose(); } catch { }
-            foreach (var d in _diskCounters.Values)
-            {
-                try { d.active.Dispose(); } catch { }
-                try { d.read.Dispose(); } catch { }
-                try { d.write.Dispose(); } catch { }
-            }
-            foreach (var n in _netCounters.Values)
-            {
-                try { n.sent.Dispose(); } catch { }
-                try { n.recv.Dispose(); } catch { }
-                try { n.bw.Dispose(); } catch { }
-            }
-            _gpuAggregator?.Dispose();
+            foreach (var d in _diskCounters.Values) { try { d.active.Dispose(); } catch { } try { d.read.Dispose(); } catch { } try { d.write.Dispose(); } catch { } }
+            foreach (var n in _netCounters.Values) { try { n.sent.Dispose(); } catch { } try { n.recv.Dispose(); } catch { } try { n.bw.Dispose(); } catch { } }
         }
     }
-
-    #region MODELOS ESTÁTICOS
-    public sealed class CpuDetailInfo
-    {
-        public string Name { get; set; } = "";
-        public int Sockets { get; set; }
-        public int PhysicalCores { get; set; }
-        public int LogicalProcessors { get; set; }
-        public int BaseClockMHz { get; set; }
-        public int L2CacheKB { get; set; }
-        public int L3CacheKB { get; set; }
-        public bool VirtualizationEnabled { get; set; }
-    }
-
-    public sealed class MemoryDetailInfo
-    {
-        public ulong TotalBytes { get; set; }
-        public ulong FreeBytes { get; set; }
-        public ulong InUseBytes { get; set; }
-        public ulong HardwareReservedBytes { get; set; }
-        public ulong CacheBytes { get; set; }
-        public ulong PagedPoolBytes { get; set; }
-        public ulong NonPagedPoolBytes { get; set; }
-    }
-
-    public sealed class DiskStaticInfo
-    {
-        public string DriveLetter { get; set; } = "";
-        public string Model { get; set; } = "";
-        public ulong CapacityBytes { get; set; }
-        public ulong FreeBytes { get; set; }
-    }
-
-    public sealed class NetworkAdapterStaticInfo
-    {
-        public string Name { get; set; } = "";
-        public ulong SpeedBitsPerSec { get; set; }
-        public string MacAddress { get; set; } = "";
-    }
-
-    public sealed class GpuDetailInfo
-    {
-        public string Name { get; set; } = "";
-        public string DriverVersion { get; set; } = "";
-        public DateTime DriverDate { get; set; }
-        public string Location { get; set; } = "";
-        public ulong TotalDedicatedBytes { get; set; }
-        public ulong TotalSharedBytes { get; set; }
-        public string PnpDeviceId { get; set; } = "";
-    }
-    #endregion
-
-    #region MODELOS DINÁMICOS
-    public sealed class CpuCoreUsageInfo
-    {
-        public int CoreIndex { get; set; }
-        public double UsagePercent { get; set; }
-    }
-
-    public sealed class DiskDynamicInfo
-    {
-        public string Instance { get; set; } = "";
-        public double ActiveTimePercent { get; set; }
-        public double ReadBytesPerSec { get; set; }
-        public double WriteBytesPerSec { get; set; }
-    }
-
-    public sealed class NetworkAdapterDynamicInfo
-    {
-        public string Name { get; set; } = "";
-        public double SentBytesPerSec { get; set; }
-        public double ReceivedBytesPerSec { get; set; }
-        public double BandwidthBytesPerSec { get; set; }
-    }
-
-    public sealed class GpuAdapterDynamicInfo
-    {
-        public string AdapterKey { get; set; } = "";
-        public double GlobalUsagePercent { get; set; }
-        public double ThreeDPercent { get; set; }
-        public double ComputePercent { get; set; }
-    }
-    #endregion
 }

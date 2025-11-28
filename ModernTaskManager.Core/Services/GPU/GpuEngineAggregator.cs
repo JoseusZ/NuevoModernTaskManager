@@ -4,7 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text.RegularExpressions;
 
-namespace ModernTaskManager.Core.Services
+namespace ModernTaskManager.Core.Services.GPU
 {
     /// <summary>
     /// Agregador estilo Administrador de Tareas para uso global de GPU.

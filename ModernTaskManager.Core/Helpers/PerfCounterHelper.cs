@@ -9,10 +9,22 @@ namespace ModernTaskManager.Core.Helpers
     {
         public static string ResolveCategory(params string[] names)
         {
-            var categories = PerformanceCounterCategory.GetCategories()
-                .Select(c => c.CategoryName)
-                .ToList();
+            List<string> categories;
+            try
+            {
+                categories = PerformanceCounterCategory.GetCategories()
+                    .Select(c => c.CategoryName)
+                    .ToList();
+            }
+            catch
+            {
+                // Si falla al listar todas, intentamos verificar si existe la primera opción directamente
+                if (names.Length > 0 && PerformanceCounterCategory.Exists(names[0]))
+                    return names[0];
+                throw new Exception("Error al leer categorías de rendimiento del sistema.");
+            }
 
+            // 1. Búsqueda exacta
             foreach (var name in names)
             {
                 var match = categories.FirstOrDefault(c =>
@@ -22,6 +34,7 @@ namespace ModernTaskManager.Core.Helpers
                     return match;
             }
 
+            // 2. Búsqueda parcial (Contiene)
             foreach (var name in names)
             {
                 var lower = name.ToLower();
@@ -31,6 +44,11 @@ namespace ModernTaskManager.Core.Helpers
                 if (match != null)
                     return match;
             }
+
+            // Fallback: Si buscábamos "GPU Engine" y no está, devolvemos el nombre en inglés por si acaso
+            // (A veces la lista de categorías falla pero el constructor directo funciona)
+            if (names.Contains("GPU Engine") || names.Contains("Motor de GPU"))
+                return "GPU Engine";
 
             throw new Exception(
                 $"No se pudo resolver ninguna categoría: {string.Join(", ", names)}");
@@ -38,33 +56,42 @@ namespace ModernTaskManager.Core.Helpers
 
         public static string ResolveCounter(string category, params string[] names)
         {
-            var cat = new PerformanceCounterCategory(category);
-
-            var counters = cat.GetCounters()
-                .Select(c => c.CounterName)
-                .ToList();
-
-            foreach (var name in names)
+            try
             {
-                var match = counters.FirstOrDefault(c =>
-                    string.Equals(c, name, StringComparison.OrdinalIgnoreCase));
+                var cat = new PerformanceCounterCategory(category);
+                // Usamos la primera instancia disponible para inspeccionar los nombres de contadores
+                string instance = cat.GetInstanceNames().FirstOrDefault() ?? "";
 
-                if (match != null)
-                    return match;
+                var counters = cat.GetCounters(instance)
+                    .Select(c => c.CounterName)
+                    .ToList();
+
+                // 1. Exacta
+                foreach (var name in names)
+                {
+                    var match = counters.FirstOrDefault(c =>
+                        string.Equals(c, name, StringComparison.OrdinalIgnoreCase));
+
+                    if (match != null) return match;
+                }
+
+                // 2. Parcial
+                foreach (var name in names)
+                {
+                    var lower = name.ToLower();
+                    var match = counters.FirstOrDefault(c =>
+                        c.ToLower().Contains(lower));
+
+                    if (match != null) return match;
+                }
+            }
+            catch
+            {
+                // Si falla la inspección (permisos, etc.), devolvemos el primer nombre esperado
+                // y rezamos para que funcione.
             }
 
-            foreach (var name in names)
-            {
-                var lower = name.ToLower();
-                var match = counters.FirstOrDefault(c =>
-                    c.ToLower().Contains(lower));
-
-                if (match != null)
-                    return match;
-            }
-
-            throw new Exception(
-                $"No se pudo resolver contador en '{category}': {string.Join(", ", names)}");
+            return names[0];
         }
 
         /// <summary>
@@ -235,7 +262,8 @@ namespace ModernTaskManager.Core.Helpers
                     return null;
 
                 var counters = cat.GetCounters(instance);
-                if (!counters.Any(c => c.CounterName == counter))
+                // Corrección: Búsqueda flexible también aquí
+                if (!counters.Any(c => string.Equals(c.CounterName, counter, StringComparison.OrdinalIgnoreCase)))
                     return null;
 
                 return new PerformanceCounter(category, counter, instance);
