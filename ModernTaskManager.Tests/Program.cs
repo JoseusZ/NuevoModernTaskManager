@@ -75,11 +75,27 @@ namespace ModernTaskManager.Tests
                         {
                             string diskSpeed = FormatBytes(p.DiskReadSpeed + p.DiskWriteSpeed) + "/s";
                             string category = p.Category == ProcessCategory.Application ? "APP" : "BG";
-                            string detail = p.Category == ProcessCategory.Application ? p.MainWindowTitle : p.Username;
-                            if (string.IsNullOrEmpty(detail)) detail = p.CommandLine;
 
-                            string line = string.Format("{0,-6} {1,-25} {2,-5} {3,-6:F1} {4,-12} {5,-4} {6}",
-                                p.Pid, Truncate(p.Name, 24), p.Architecture, p.CpuUsage, diskSpeed, category, Truncate(detail, 60));
+                            // Check visual: ¿Tiene un handle de icono válido?
+                            string iconCheck = (p.IconHandle != IntPtr.Zero) ? "[ICON]" : "[    ]";
+
+                            string detail = p.Category == ProcessCategory.Application
+                                ? (string.IsNullOrEmpty(p.MainWindowTitle) ? p.Name : p.MainWindowTitle)
+                                : p.Username;
+
+                            if (p.Category == ProcessCategory.Application) Console.ForegroundColor = ConsoleColor.Cyan;
+                            else Console.ForegroundColor = ConsoleColor.Gray;
+
+                            // Agregamos la columna de icono en la salida
+                            string line = string.Format("{0,-6} {1,-20} {2,-6} {3,-5} {4,-5:F1} {5,-10} {6,-4} {7}",
+                                p.Pid,
+                                Truncate(p.Name, 18),
+                                iconCheck, // Columna Icono
+                                p.Architecture,
+                                p.CpuUsage,
+                                diskSpeed,
+                                category,
+                                Truncate(detail, 50));
 
                             Console.WriteLine(line.PadRight(148));
                             count++;

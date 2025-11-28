@@ -1,8 +1,8 @@
 ﻿using System;
 using ModernTaskManager.Core.Gpu;
 using ModernTaskManager.Core.Models;
-// Asegúrate de que estos usings apunten a donde guardaste los archivos
 using ModernTaskManager.Core.Services.GPU;
+using LegacyGpuProvider = ModernTaskManager.Core.Services.GPU.ExtremeLegacyGpuProvider;
 
 namespace ModernTaskManager.Core.Services
 {
@@ -15,14 +15,8 @@ namespace ModernTaskManager.Core.Services
         {
             Console.WriteLine("--- INICIANDO SERVICIO DE GPU ---");
 
-            // 1. Intentar iniciar el proveedor Moderno (WDDM/D3DKMT)
             var modern = new ModernGpuProvider();
-
-            // CAPTURA DE ERRORES DE INICIALIZACIÓN
-            try
-            {
-                modern.Initialize();
-            }
+            try { modern.Initialize(); }
             catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
@@ -39,40 +33,42 @@ namespace ModernTaskManager.Core.Services
             }
             else
             {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("[ADVERTENCIA] ModernGpuProvider no es compatible o falló. Cambiando a Legacy.");
-                Console.WriteLine("Posibles causas:");
-                Console.WriteLine("1. No estás ejecutando como ADMINISTRADOR (Vital para contadores de GPU).");
-                Console.WriteLine("2. Los contadores de rendimiento están dañados (ejecutar 'lodctr /r' en CMD).");
-                Console.WriteLine("3. El nombre de la categoría 'GPU Engine' no se encontró en tu idioma.");
-                Console.ResetColor();
-
                 modern.Dispose();
-                _provider = new LegacyGpuProvider();
-                _provider.Initialize();
+
+                // 2. Proveedor extremo NVAPI/ADL/D3DKMT (Windows 7 y drivers antiguos)
+                var extreme = new ExtremeLegacyGpuProvider();
+                try { extreme.Initialize(); } catch { }
+                if (extreme.IsSupported)
+                {
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("[ÉXITO] ExtremeLegacyGpuProvider cargado (NVAPI/ADL/D3DKMT).");
+                    Console.ResetColor();
+                    _provider = extreme;
+                }
+                else
+                {
+                    extreme.Dispose();
+
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("[ADVERTENCIA] Modern y ExtremeLegacy no disponibles. Cambiando a Legacy (WMI).");
+                    Console.ResetColor();
+
+                    _provider = new LegacyGpuProvider();
+                    _provider.Initialize();
+                }
             }
 
-            // Cargar datos estáticos al inicio
             StaticInfo = _provider.GetStaticInfo();
         }
 
         public GpuAdapterDynamicInfo GetGpuUsage()
         {
-            try
-            {
-                return _provider.GetUsage();
-            }
-            catch
-            {
-                return new GpuAdapterDynamicInfo();
-            }
+            try { return _provider.GetUsage(); }
+            catch { return new GpuAdapterDynamicInfo(); }
         }
 
         public string GetProviderName() => _provider.ProviderName;
 
-        public void Dispose()
-        {
-            _provider?.Dispose();
-        }
+        public void Dispose() { _provider?.Dispose(); }
     }
 }

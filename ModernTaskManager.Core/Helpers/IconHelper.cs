@@ -3,16 +3,17 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace ModernTaskManager.Core.Native
+namespace ModernTaskManager.Core.Helpers
 {
-    internal static class IconHelper
+    public static class IconHelper
     {
         [Flags]
         private enum Shgfi : uint
         {
             Icon = 0x000000100,
             SmallIcon = 0x000000001,
-            UseFileAttributes = 0x000000010
+            LargeIcon = 0x000000000, // Por si quieres iconos grandes luego
+            UseFileAttributes = 0x000000010 // ¡NO USAR SI QUEREMOS EL LOGO REAL!
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -53,9 +54,12 @@ namespace ModernTaskManager.Core.Native
 
             try
             {
-                var flags = Shgfi.Icon | Shgfi.SmallIcon | Shgfi.UseFileAttributes;
+                // CORRECCIÓN: Quitamos UseFileAttributes para que lea el icono real del .exe
+                var flags = Shgfi.Icon | Shgfi.SmallIcon;
+
                 var ok = SHGetFileInfo(path, 0, out SHFILEINFO info,
                     (uint)Marshal.SizeOf(typeof(SHFILEINFO)), flags);
+
                 if (ok != IntPtr.Zero && info.hIcon != IntPtr.Zero)
                     return info.hIcon;
             }
@@ -68,18 +72,24 @@ namespace ModernTaskManager.Core.Native
             try
             {
                 using var proc = Process.GetProcessById(pid);
-                if (proc.Handle == IntPtr.Zero) return null;
 
-                // Primero QueryFullProcessImageName (compatible Win7+)
-                var sb = new StringBuilder(1024);
-                int len = sb.Capacity;
-                if (QueryFullProcessImageName(proc.Handle, 0, sb, ref len))
-                    return sb.ToString();
+                // Método 1: API Nativa (Más rápido y compatible con 32/64 bits cruzados)
+                try
+                {
+                    var sb = new StringBuilder(1024);
+                    int len = sb.Capacity;
+                    if (QueryFullProcessImageName(proc.Handle, 0, sb, ref len))
+                        return sb.ToString();
+                }
+                catch { }
 
-                // Fallback MainModule (puede fallar por permisos)
+                // Método 2: Fallback .NET
                 try { return proc.MainModule?.FileName; } catch { }
             }
-            catch { }
+            catch
+            {
+                // Acceso denegado al proceso (es normal en System, Registry, etc.)
+            }
             return null;
         }
 

@@ -10,52 +10,27 @@ using ModernTaskManager.Core.Native;
 
 namespace ModernTaskManager.Core.Services
 {
-    /// <summary>
-    /// SystemMonitor: recoge información periódica de procesos (vía ProcessService)
-    /// y aplica los cambios en la colección <see cref="Processes"/> en el
-    /// SynchronizationContext proporcionado (habitualmente el hilo UI).
-    /// 
-    /// Si no se provee un SynchronizationContext en el constructor, se intentará
-    /// capturar SynchronizationContext.Current. Si no existe ninguno, las actualizaciones
-    /// se ejecutarán en el hilo que llame a Update() (fallback).
-    /// </summary>
     public class SystemMonitor : IDisposable
     {
         private readonly ProcessService _processService;
-
-        // Mapa para recordar el estado anterior de cada proceso
         private readonly Dictionary<int, ProcessInfo> _processMap;
         private readonly object _lock = new object();
 
         private ulong _previousSystemKernelTime;
         private ulong _previousSystemUserTime;
 
-        /// <summary>
-        /// Colección pública enlazable (UI). NUNCA debe modificarse desde un hilo background
-        /// — this class garantiza que las modificaciones se realicen en el sync context.
-        /// </summary>
         public ObservableCollection<ProcessInfo> Processes { get; }
 
         private readonly SynchronizationContext? _syncContext;
         private bool _disposed;
 
-        // Añadir cache simple y liberar iconos al remover procesos.
+        // Cache de iconos: Clave = Ruta/Nombre, Valor = (Handle, Contador de Referencias)
         private readonly Dictionary<string, (IntPtr hIcon, int refCount)> _iconCache = new();
 
-        /// <summary>
-        /// Crea SystemMonitor intentando capturar SynchronizationContext.Current (p. ej. hilo UI).
-        /// Si creas la instancia desde la UI, el contexto será el correcto y las actualizaciones se
-        /// harán en el hilo UI. Si la instancia se crea desde un hilo background, pásale explícitamente
-        /// el syncContext (por ejemplo: SynchronizationContext.Current o un wrapper).
-        /// </summary>
         public SystemMonitor() : this(SynchronizationContext.Current)
         {
         }
 
-        /// <summary>
-        /// Constructor que acepta un SynchronizationContext opcional.
-        /// </summary>
-        /// <param name="syncContext">SynchronizationContext donde aplicar los cambios (UI thread).</param>
         public SystemMonitor(SynchronizationContext? syncContext)
         {
             _processService = new ProcessService();
@@ -63,7 +38,6 @@ namespace ModernTaskManager.Core.Services
             _processMap = new Dictionary<int, ProcessInfo>();
             _syncContext = syncContext;
 
-            // Inicializar tiempos de sistema (si es posible)
             if (Kernel32.GetSystemTimes(out _, out var kernelTime, out var userTime))
             {
                 _previousSystemKernelTime = kernelTime.ToULong();
@@ -71,123 +45,99 @@ namespace ModernTaskManager.Core.Services
             }
         }
 
-        /// <summary>
-        /// Ejecuta una acción en el contexto sincronizado (usualmente UI). Si no hay syncContext,
-        /// ejecuta la acción inmediatamente en el hilo actual (fallback).
-        /// </summary>
         private void RunOnSyncContext(Action action)
         {
             if (action == null) return;
             if (_syncContext != null)
             {
-                try
-                {
-                    _syncContext.Post(_ => {
-                        try { action(); }
-                        catch { /* no propagar excepciones a caller */ }
-                    }, null);
-                }
-                catch
-                {
-                    // Fallback: intentar ejecutar directamente
+                _syncContext.Post(_ => {
                     try { action(); } catch { }
-                }
+                }, null);
             }
             else
             {
-                // No se puede publicar al UI thread: ejecutar en el hilo actual (caller).
-                // Este fallback se usa cuando la instancia fue creada sin sync context.
                 try { action(); } catch { }
             }
         }
 
+        // --- GESTIÓN DE ICONOS (Reference Counting) ---
+
         private IntPtr AcquireIconForProcess(ProcessInfo p)
         {
-            // Intentar obtener ruta para clave. Si no hay ruta, usar nombre.
-            string key = p.CommandLine;
-            if (string.IsNullOrEmpty(key))
-                key = p.Name;
+            // Usamos la ruta completa o el nombre como clave
+            string key = !string.IsNullOrEmpty(p.CommandLine) ? p.CommandLine : p.Name;
 
-            if (_iconCache.TryGetValue(key, out var entry))
+            lock (_iconCache) // Proteger acceso concurrente al diccionario de iconos
             {
-                _iconCache[key] = (entry.hIcon, entry.refCount + 1);
-                return entry.hIcon;
-            }
+                if (_iconCache.TryGetValue(key, out var entry))
+                {
+                    // Icono ya existe: incrementamos referencia y devolvemos el mismo handle
+                    _iconCache[key] = (entry.hIcon, entry.refCount + 1);
+                    return entry.hIcon;
+                }
 
-            IntPtr hIcon = IconHelper.TryGetProcessIcon(p.Pid);
-            if (hIcon != IntPtr.Zero)
-            {
-                _iconCache[key] = (hIcon, 1);
-                return hIcon;
+                // Icono nuevo: intentamos extraerlo
+                IntPtr hIcon = IconHelper.TryGetProcessIcon(p.Pid);
+                if (hIcon != IntPtr.Zero)
+                {
+                    _iconCache[key] = (hIcon, 1);
+                    return hIcon;
+                }
             }
             return IntPtr.Zero;
         }
 
         private void ReleaseIconForProcess(ProcessInfo p)
         {
-            string key = p.CommandLine;
-            if (string.IsNullOrEmpty(key))
-                key = p.Name;
+            if (p.IconHandle == IntPtr.Zero) return;
 
-            if (_iconCache.TryGetValue(key, out var entry))
+            string key = !string.IsNullOrEmpty(p.CommandLine) ? p.CommandLine : p.Name;
+
+            lock (_iconCache)
             {
-                int newCount = entry.refCount - 1;
-                if (newCount <= 0)
+                if (_iconCache.TryGetValue(key, out var entry))
                 {
-                    IconHelper.DestroyIconSafe(entry.hIcon);
-                    _iconCache.Remove(key);
-                }
-                else
-                {
-                    _iconCache[key] = (entry.hIcon, newCount);
+                    int newCount = entry.refCount - 1;
+                    if (newCount <= 0)
+                    {
+                        // Nadie más usa este icono: destruirlo para liberar RAM GDI
+                        IconHelper.DestroyIconSafe(entry.hIcon);
+                        _iconCache.Remove(key);
+                    }
+                    else
+                    {
+                        // Todavía en uso: solo bajar contador
+                        _iconCache[key] = (entry.hIcon, newCount);
+                    }
                 }
             }
         }
 
-        /// <summary>
-        /// Actualiza el estado de procesos: calcula deltas y prepara acciones para aplicar en la UI.
-        /// </summary>
         public void Update()
         {
             if (_disposed) return;
 
-            // 1. Tiempo Sistema (CPU)
             if (!Kernel32.GetSystemTimes(out _, out var ftKernel, out var ftUser)) return;
             ulong currentKernelTime = ftKernel.ToULong();
             ulong currentUserTime = ftUser.ToULong();
-
-            // deltaSystemTime en unidades coherentes con FILETIME->ticks (100-ns)
             ulong deltaSystemTime = (currentKernelTime - _previousSystemKernelTime) + (currentUserTime - _previousSystemUserTime);
+
             _previousSystemKernelTime = currentKernelTime;
             _previousSystemUserTime = currentUserTime;
 
-            // 2. Obtener lista cruda de procesos (puede lanzar; capturamos)
             List<ProcessInfo> currentProcessList;
-            try
-            {
-                currentProcessList = _processService.GetProcesses();
-            }
-            catch
-            {
-                // Si falla la obtención de procesos, no hacemos nada en este ciclo.
-                return;
-            }
+            try { currentProcessList = _processService.GetProcesses(); } catch { return; }
 
-            // 3. Obtener lista de "Aplicaciones" (Ventanas visibles) - puede ser costoso pero lo hacemos.
             var appWindows = WindowHelper.GetAppProcesses();
             var pidsThisCycle = new HashSet<int>();
-
-            // Lista de acciones que se aplicarán en batch en el sync context (UI).
             var uiActions = new List<Action>();
 
             lock (_lock)
             {
-                // Procesamos cada proceso crudo y preparamos una acción para aplicar en la UI.
                 foreach (var procData in currentProcessList)
                 {
                     pidsThisCycle.Add(procData.Pid);
 
-                    // Determinar Categoría y Título
                     if (appWindows.ContainsKey(procData.Pid))
                     {
                         procData.Category = ProcessCategory.Application;
@@ -201,28 +151,17 @@ namespace ModernTaskManager.Core.Services
 
                     if (_processMap.TryGetValue(procData.Pid, out var existingProcess))
                     {
-                        // --- PROCESO EXISTENTE ---
-                        // Preparamos una acción que actualice las propiedades del objeto existente
+                        // --- ACTUALIZAR EXISTENTE ---
                         uiActions.Add(() =>
                         {
                             try
                             {
-                                // A) CPU
-                                // Convertimos KernelTime/UserTime (long) a ulong para cálculo de delta
                                 ulong prevProcTime = (ulong)existingProcess.KernelTime + (ulong)existingProcess.UserTime;
                                 ulong currentProcTime = (ulong)procData.KernelTime + (ulong)procData.UserTime;
                                 ulong deltaProc = (currentProcTime > prevProcTime) ? currentProcTime - prevProcTime : 0UL;
-                                if (deltaSystemTime > 0)
-                                {
-                                    // cpuUsage como porcentaje del tiempo de sistema
-                                    existingProcess.CpuUsage = (deltaProc / (double)deltaSystemTime) * 100.0;
-                                }
-                                else
-                                {
-                                    existingProcess.CpuUsage = 0.0;
-                                }
 
-                                // B) Disco (velocidad en bytes desde último muestreo)
+                                existingProcess.CpuUsage = (deltaSystemTime > 0) ? (deltaProc / (double)deltaSystemTime) * 100.0 : 0.0;
+
                                 long deltaRead = procData.DiskReadBytes - existingProcess.DiskReadBytes;
                                 long deltaWrite = procData.DiskWriteBytes - existingProcess.DiskWriteBytes;
                                 existingProcess.DiskReadSpeed = deltaRead < 0 ? 0 : deltaRead;
@@ -230,71 +169,58 @@ namespace ModernTaskManager.Core.Services
                                 existingProcess.DiskReadBytes = procData.DiskReadBytes;
                                 existingProcess.DiskWriteBytes = procData.DiskWriteBytes;
 
-                                // C) Datos básicos
                                 existingProcess.WorkingSetSize = procData.WorkingSetSize;
                                 existingProcess.PrivatePageCount = procData.PrivatePageCount;
                                 existingProcess.ThreadCount = procData.ThreadCount;
                                 existingProcess.HandleCount = procData.HandleCount;
-
-                                // Actualizar agrupación (puede cambiar)
                                 existingProcess.Category = procData.Category;
                                 existingProcess.MainWindowTitle = procData.MainWindowTitle;
-
-                                // Copiar arquitectura/commandline si cambió (raro pero seguro)
                                 existingProcess.Architecture = procData.Architecture;
-                                if (!string.IsNullOrEmpty(procData.CommandLine) && existingProcess.CommandLine != procData.CommandLine)
-                                    existingProcess.CommandLine = procData.CommandLine;
 
-                                // Actualizar tiempos para siguiente ciclo
                                 existingProcess.KernelTime = procData.KernelTime;
                                 existingProcess.UserTime = procData.UserTime;
                             }
-                            catch
-                            {
-                                // No propagamos excepciones hacia Update()
-                            }
+                            catch { }
                         });
                     }
                     else
                     {
                         // --- NUEVO PROCESO ---
-                        // Normalizamos valores iniciales y preparamos agregarlo a la colección y al mapa
                         procData.CpuUsage = 0.0;
                         procData.DiskReadSpeed = 0;
                         procData.DiskWriteSpeed = 0;
 
-                        // Carga diferida de CommandLine (optimización) -- puede devolver empty si falla
+                        // 1. Obtener Línea de Comandos (WMI)
                         try
                         {
                             procData.CommandLine = SystemInfoHelper.GetProcessCommandLine(procData.Pid);
                         }
-                        catch { procData.CommandLine = string.Empty; }
+                        catch { procData.CommandLine = ""; }
 
-                        // Asignar icono
-                        try { procData.IconHandle = AcquireIconForProcess(procData); } catch { procData.IconHandle = IntPtr.Zero; }
+                        // 2. Obtener Icono (Usando Caché)
+                        procData.IconHandle = AcquireIconForProcess(procData);
 
                         uiActions.Add(() =>
                         {
                             try
                             {
-                                // Añadir a mapa y colección en UI thread
                                 _processMap[procData.Pid] = procData;
                                 Processes.Add(procData);
                             }
-                            catch
-                            {
-                                // ignore
-                            }
+                            catch { }
                         });
                     }
                 }
 
-                // 4. Limpieza: detectar procesos que desaparecieron y prepararlos para remover en UI
+                // --- LIMPIEZA DE PROCESOS MUERTOS ---
                 var pidsToRemove = _processMap.Keys.Where(pid => !pidsThisCycle.Contains(pid)).ToList();
                 foreach (var pid in pidsToRemove)
                 {
                     if (_processMap.TryGetValue(pid, out var procToRemove))
                     {
+                        // Liberar icono antes de quitar de la lista
+                        ReleaseIconForProcess(procToRemove);
+
                         uiActions.Add(() =>
                         {
                             try
@@ -302,62 +228,45 @@ namespace ModernTaskManager.Core.Services
                                 Processes.Remove(procToRemove);
                                 _processMap.Remove(pid);
                             }
-                            catch
-                            {
-                                // ignore
-                            }
+                            catch { }
                         });
                     }
                 }
-            } // lock
+            }
 
-            // 5. Aplicar todas las actualizaciones en el sync context (UI) de una sola vez
+            // Ejecutar lote de cambios en UI
             if (uiActions.Count > 0)
             {
                 RunOnSyncContext(() =>
                 {
-                    foreach (var a in uiActions)
-                    {
-                        try { a(); } catch { /* proteger loop */ }
-                    }
+                    foreach (var a in uiActions) try { a(); } catch { }
                 });
             }
         }
 
-        /// <summary>
-        /// Dispose: limpia colecciones y recursos nativos.
-        /// </summary>
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
 
-            // Limpieza: vaciar la colección en el sync context para no causar cross-thread issues
             RunOnSyncContext(() =>
             {
-                try
-                {
-                    Processes.Clear();
-                }
-                catch { }
+                try { Processes.Clear(); } catch { }
             });
 
-            // Liberar mapa interno
             lock (_lock)
             {
-                foreach (var kv in _iconCache.Values)
-                    IconHelper.DestroyIconSafe(kv.hIcon);
-                _iconCache.Clear();
-
+                // Limpiar cache de iconos nativos
+                lock (_iconCache)
+                {
+                    foreach (var kv in _iconCache.Values)
+                        IconHelper.DestroyIconSafe(kv.hIcon);
+                    _iconCache.Clear();
+                }
                 _processMap.Clear();
             }
 
-            // Si ProcessService implementa IDisposable, disposearlo (defensivo)
-            try
-            {
-                (_processService as IDisposable)?.Dispose();
-            }
-            catch { }
+            try { (_processService as IDisposable)?.Dispose(); } catch { }
         }
     }
 }

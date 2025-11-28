@@ -49,13 +49,15 @@
     <Compile Include="Models\ServiceInfo.cs" />
     <Compile Include="Native\D3DKMT.cs" />
     <Compile Include="Native\DXGIWrapper.cs" />
-    <Compile Include="Native\IconHelper.cs" />
+    <Compile Include="Helpers\IconHelper.cs" />
     <Compile Include="Native\User32.cs" />
     <Compile Include="Services\GpuServices.cs" />
+    <Compile Include="Services\GPU\ExtremeLegacyGpuProvider.cs" />
     <Compile Include="Services\GPU\GpuEngineAggregator.cs" />
     <Compile Include="Services\GPU\GpuMetricsService.cs" />
     <Compile Include="Services\GPU\IGpuUsageProvider.cs" />
     <Compile Include="Services\GPU\LegacyGpuProvider.cs" />
+    <Compile Include="Services\GPU\LegacyGpuProvider.Wmi.cs" />
     <Compile Include="Services\GPU\ModernGpuProvider.cs" />
     <Compile Include="Services\HardwareInfoService.cs" />
     <Compile Include="Services\WindowsServiceManager.cs" />

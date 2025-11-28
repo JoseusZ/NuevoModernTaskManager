@@ -1,11 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Management;
 using System.Linq;
+using System.Management;
 using ModernTaskManager.Core.Helpers;
 using ModernTaskManager.Core.Models;
 using ModernTaskManager.Core.Gpu;
+using ModernTaskManager.Core.Native; // DXGIWrapper + D3DKMT
 
 namespace ModernTaskManager.Core.Services.GPU
 {
@@ -14,8 +15,15 @@ namespace ModernTaskManager.Core.Services.GPU
         public string ProviderName => "Modern (WDDM + D3DKMT)";
         public bool IsSupported { get; private set; } = false;
 
-        // Contadores (Listas para sumar todas las instancias)
-        private readonly List<PerformanceCounter> _gpu3dCounters = new();
+        // Motores agregados y por-proceso (agregamos Copy, VideoDecode, VideoEncode)
+        private readonly List<PerformanceCounter> _gpuAllEnginesCounters = new();  // engtype_* (agregado) o pid_*_engtype_* (per proceso)
+        private readonly List<PerformanceCounter> _gpu3dAggregated = new();        // 3D
+        private readonly List<PerformanceCounter> _gpuComputeAggregated = new();   // Compute
+        private readonly List<PerformanceCounter> _gpuCopyAggregated = new();      // Copy
+        private readonly List<PerformanceCounter> _gpuVdecAggregated = new();      // VideoDecode
+        private readonly List<PerformanceCounter> _gpuVencAggregated = new();      // VideoEncode
+
+        // Memoria
         private readonly List<PerformanceCounter> _gpuVramCounters = new();
         private readonly List<PerformanceCounter> _gpuSharedCounters = new();
 
@@ -24,42 +32,54 @@ namespace ModernTaskManager.Core.Services.GPU
         private int _refreshTick = 0;
         private ulong _totalVramCached = 0;
 
-        // Nombres de contadores cacheados que sabemos que funcionan
-        private string _valid3dCounterName = "";
+        private string _validEngineCounterName = "";
         private string _validVramCounterName = "";
         private string _validSharedCounterName = "";
 
+        private readonly Stopwatch _samplingWatch = new();
+        private readonly int _minSamplingMs = 250;
+
+        // Suavizado sobre total (queremos estabilidad similar a Task Manager)
+        private double _emaTotal = 0;
+        private const double _emaAlpha = 0.35;
+
+        // Autocuración cuando el total queda en 0
+        private int _zeroStreak = 0;
+        private const int ZeroRebuildThreshold = 5;
+        private bool _usingAggregatedOnly = true;
+
         public void Initialize()
         {
-            // 1. Resolver categoría MOTOR 3D
-            // Probamos nombres comunes directamente
-            string[] engineNames = { "GPU Engine", "Motor de GPU" };
-            foreach (var name in engineNames)
+            try
             {
-                if (PerformanceCounterCategory.Exists(name)) { _gpuCategoryName = name; break; }
-            }
+                _gpuCategoryName = TryResolveCategory("GPU Engine", "Motor de GPU");
+                if (string.IsNullOrEmpty(_gpuCategoryName))
+                {
+                    IsSupported = false;
+                    return;
+                }
 
-            if (string.IsNullOrEmpty(_gpuCategoryName))
+                _gpuMemCategoryName = TryResolveCategory("GPU Adapter Memory", "Memoria de adaptador de GPU");
+                IsSupported = true;
+
+                RefreshEngineCounters(forceRebuild: true, fallbackToPerProcess: false);
+                SetupMemoryCounters();
+
+                try { _totalVramCached = SystemInfoHelper.GetGpuTotalMemory(); } catch { _totalVramCached = 0; }
+
+                if (_gpuAllEnginesCounters.Count == 0 && _gpuVramCounters.Count == 0 && _gpuSharedCounters.Count == 0)
+                {
+                    IsSupported = false;
+                    Dispose();
+                }
+
+                _samplingWatch.Restart();
+            }
+            catch
             {
                 IsSupported = false;
-                return;
+                Dispose();
             }
-
-            IsSupported = true; // Al menos tenemos motor
-
-            // 2. Resolver categoría MEMORIA
-            string[] memNames = { "GPU Adapter Memory", "Memoria de adaptador de GPU" };
-            foreach (var name in memNames)
-            {
-                if (PerformanceCounterCategory.Exists(name)) { _gpuMemCategoryName = name; break; }
-            }
-
-            // 3. Inicializar
-            RefreshCounters();
-            SetupMemoryCounters();
-
-            // 4. VRAM Total
-            try { _totalVramCached = SystemInfoHelper.GetGpuTotalMemory(); } catch { }
         }
 
         public GpuDetailInfo GetStaticInfo()
@@ -77,14 +97,13 @@ namespace ModernTaskManager.Core.Services.GPU
                     string dateStr = mo["DriverDate"]?.ToString() ?? "";
                     if (dateStr.Length >= 8 && DateTime.TryParseExact(dateStr.Substring(0, 8), "yyyyMMdd", null, System.Globalization.DateTimeStyles.None, out var dt))
                         info.DriverDate = dt;
-
-                    if (info.Name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) ||
-                        info.Name.Contains("AMD", StringComparison.OrdinalIgnoreCase))
-                        break;
+                    break;
                 }
 
                 info.TotalDedicatedBytes = _totalVramCached > 0 ? _totalVramCached : SystemInfoHelper.GetGpuTotalMemory();
-                info.TotalSharedBytes = SystemInfoHelper.GetTotalPhysicalMemory() / 2;
+                ulong totalPhys = 0;
+                try { totalPhys = SystemInfoHelper.GetTotalPhysicalMemory(); } catch { }
+                info.TotalSharedBytes = totalPhys > 0 ? totalPhys / 2 : 0;
             }
             catch { }
             return info;
@@ -94,88 +113,166 @@ namespace ModernTaskManager.Core.Services.GPU
         {
             if (!IsSupported) return new GpuAdapterDynamicInfo();
 
-            if (++_refreshTick > 20)
+            if (_samplingWatch.IsRunning && _samplingWatch.ElapsedMilliseconds < _minSamplingMs)
             {
-                RefreshCounters();
+                return new GpuAdapterDynamicInfo
+                {
+                    GlobalUsagePercent = Math.Min(100.0, _emaTotal),
+                    DedicatedMemoryUsed = 0,
+                    SharedMemoryUsed = 0
+                };
+            }
+            _samplingWatch.Restart();
+
+            if (++_refreshTick > 30)
+            {
+                RefreshEngineCounters();
                 _refreshTick = 0;
             }
 
-            double total3d = 0;
-            ulong vram = 0;
-            ulong shared = 0;
+            // Lecturas por motor
+            double threeD = ReadSum(_gpu3dAggregated);
+            double compute = ReadSum(_gpuComputeAggregated);
+            double copy = ReadSum(_gpuCopyAggregated);
+            double vdec = ReadSum(_gpuVdecAggregated);
+            double venc = ReadSum(_gpuVencAggregated);
 
-            // 1. Sumar 3D
-            foreach (var c in _gpu3dCounters)
+            // Suma “total” (puede subestimar o sobreestimar en algunos drivers)
+            double totalAll = ReadSum(_gpuAllEnginesCounters);
+
+            // Autocuración si totalAll parece muerto
+            if (totalAll <= 0.1 && threeD <= 0.1 && compute <= 0.1 && copy <= 0.1 && vdec <= 0.1 && venc <= 0.1)
             {
-                try { total3d += c.NextValue(); } catch { }
+                _zeroStreak++;
+                if (_zeroStreak >= ZeroRebuildThreshold)
+                {
+                    RefreshEngineCounters(forceRebuild: true, fallbackToPerProcess: true);
+                    _zeroStreak = 0;
+                }
+            }
+            else
+            {
+                _zeroStreak = 0;
             }
 
-            // 2. Sumar VRAM (Todas las instancias)
-            foreach (var c in _gpuVramCounters)
-            {
-                try { vram += (ulong)c.NextValue(); } catch { }
-            }
+            // Aproximación al “Uso” de Windows: tomar el motor más ocupado
+            double enginesMax = Math.Max(threeD, Math.Max(compute, Math.Max(copy, Math.Max(vdec, venc))));
 
-            foreach (var c in _gpuSharedCounters)
-            {
-                try { shared += (ulong)c.NextValue(); } catch { }
-            }
+            // Para evitar infravalorar en algunos drivers, usar el máximo entre suma y máximo por motor (luego clamped)
+            double rawOverall = Math.Max(enginesMax, totalAll);
+            rawOverall = Math.Min(100.0, rawOverall);
+
+            // Suavizado EMA para una gráfica más estable
+            _emaTotal = (_emaTotal == 0) ? rawOverall : (_emaAlpha * rawOverall + (1 - _emaAlpha) * _emaTotal);
+
+            // Memoria
+            ulong vram = ReadSumUlong(_gpuVramCounters);
+            ulong shared = ReadSumUlong(_gpuSharedCounters);
 
             return new GpuAdapterDynamicInfo
             {
-                GlobalUsagePercent = Math.Min(100.0, total3d),
+                GlobalUsagePercent = Math.Min(100.0, _emaTotal),
+                ThreeDPercent = Math.Min(100.0, threeD),
+                ComputePercent = Math.Min(100.0, compute),
                 DedicatedMemoryUsed = vram,
                 SharedMemoryUsed = shared
             };
         }
 
-        private void RefreshCounters()
+        private void RefreshEngineCounters(bool forceRebuild = false, bool fallbackToPerProcess = false)
         {
             if (string.IsNullOrEmpty(_gpuCategoryName)) return;
 
-            foreach (var c in _gpu3dCounters) c.Dispose();
-            _gpu3dCounters.Clear();
+            if (forceRebuild)
+            {
+                DisposeList(_gpuAllEnginesCounters);
+                DisposeList(_gpu3dAggregated);
+                DisposeList(_gpuComputeAggregated);
+                DisposeList(_gpuCopyAggregated);
+                DisposeList(_gpuVdecAggregated);
+                DisposeList(_gpuVencAggregated);
+                _validEngineCounterName = "";
+            }
+
+            if (_gpuAllEnginesCounters.Count > 0) return;
 
             try
             {
                 var cat = new PerformanceCounterCategory(_gpuCategoryName);
                 var instances = cat.GetInstanceNames();
 
-                // Si no tenemos el nombre validado aún, lo buscamos
-                if (string.IsNullOrEmpty(_valid3dCounterName))
+                if (string.IsNullOrEmpty(_validEngineCounterName))
                 {
-                    string[] candidates = { "Utilization Percentage", "Porcentaje de utilización" };
-                    _valid3dCounterName = FindWorkingCounterName(_gpuCategoryName, instances.FirstOrDefault(), candidates);
+                    _validEngineCounterName = TryResolveCounter(_gpuCategoryName,
+                        "Utilization Percentage", "Porcentaje de utilización");
                 }
+                if (string.IsNullOrEmpty(_validEngineCounterName)) return;
 
-                if (string.IsNullOrEmpty(_valid3dCounterName)) return;
+                // 1) Preferir instancias agregadas si están disponibles
+                var aggregated = instances.Where(i => i.StartsWith("engtype_", StringComparison.OrdinalIgnoreCase)).ToArray();
 
-                foreach (var inst in instances)
+                if (aggregated.Length > 0 && !fallbackToPerProcess)
                 {
-                    if (inst.EndsWith("engtype_3D", StringComparison.OrdinalIgnoreCase) ||
-                        inst.Contains("3D", StringComparison.OrdinalIgnoreCase))
-                    {
-                        try
-                        {
-                            var pc = new PerformanceCounter(_gpuCategoryName, _valid3dCounterName, inst);
-                            pc.NextValue();
-                            _gpu3dCounters.Add(pc);
-                        }
-                        catch { }
-                    }
+                    _usingAggregatedOnly = true;
+
+                    foreach (var inst in aggregated)
+                        TryAddCounter(_gpuAllEnginesCounters, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
+
+                    foreach (var inst in aggregated.Where(i => string.Equals(i, "engtype_3D", StringComparison.OrdinalIgnoreCase)))
+                        TryAddCounter(_gpu3dAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
+
+                    foreach (var inst in aggregated.Where(i => i.IndexOf("Compute", StringComparison.OrdinalIgnoreCase) >= 0).Take(8))
+                        TryAddCounter(_gpuComputeAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
+
+                    foreach (var inst in aggregated.Where(i => i.IndexOf("Copy", StringComparison.OrdinalIgnoreCase) >= 0).Take(4))
+                        TryAddCounter(_gpuCopyAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
+
+                    foreach (var inst in aggregated.Where(i => i.IndexOf("VideoDecode", StringComparison.OrdinalIgnoreCase) >= 0).Take(4))
+                        TryAddCounter(_gpuVdecAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
+
+                    foreach (var inst in aggregated.Where(i => i.IndexOf("VideoEncode", StringComparison.OrdinalIgnoreCase) >= 0).Take(4))
+                        TryAddCounter(_gpuVencAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
+                }
+                else
+                {
+                    // 2) Fallback: instancias por proceso (pid_..._engtype_*)
+                    _usingAggregatedOnly = false;
+
+                    var perProcessAll = instances.Where(i => i.IndexOf("engtype_", StringComparison.OrdinalIgnoreCase) >= 0)
+                                                .Take(64)
+                                                .ToArray();
+
+                    foreach (var inst in perProcessAll)
+                        TryAddCounter(_gpuAllEnginesCounters, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
+
+                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("engtype_3D", StringComparison.OrdinalIgnoreCase) >= 0).Take(32))
+                        TryAddCounter(_gpu3dAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
+
+                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("Compute", StringComparison.OrdinalIgnoreCase) >= 0).Take(16))
+                        TryAddCounter(_gpuComputeAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
+
+                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("Copy", StringComparison.OrdinalIgnoreCase) >= 0).Take(16))
+                        TryAddCounter(_gpuCopyAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
+
+                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("VideoDecode", StringComparison.OrdinalIgnoreCase) >= 0).Take(16))
+                        TryAddCounter(_gpuVdecAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
+
+                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("VideoEncode", StringComparison.OrdinalIgnoreCase) >= 0).Take(16))
+                        TryAddCounter(_gpuVencAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
                 }
             }
-            catch { }
+            catch
+            {
+                // categoría inaccesible o dañada
+            }
         }
 
         private void SetupMemoryCounters()
         {
             if (string.IsNullOrEmpty(_gpuMemCategoryName)) return;
 
-            foreach (var c in _gpuVramCounters) c.Dispose();
-            foreach (var c in _gpuSharedCounters) c.Dispose();
-            _gpuVramCounters.Clear();
-            _gpuSharedCounters.Clear();
+            DisposeList(_gpuVramCounters);
+            DisposeList(_gpuSharedCounters);
 
             try
             {
@@ -183,64 +280,140 @@ namespace ModernTaskManager.Core.Services.GPU
                 var instances = cat.GetInstanceNames();
                 if (instances.Length == 0) return;
 
-                // Buscar nombres correctos si no los tenemos
                 if (string.IsNullOrEmpty(_validVramCounterName))
                 {
-                    string[] dedCandidates = { "Dedicated Usage", "Bytes dedicados", "Dedicated Memory" };
-                    _validVramCounterName = FindWorkingCounterName(_gpuMemCategoryName, instances[0], dedCandidates);
+                    _validVramCounterName = TryResolveCounter(_gpuMemCategoryName,
+                        "Dedicated Usage", "Bytes dedicados", "Dedicated Memory");
                 }
-
                 if (string.IsNullOrEmpty(_validSharedCounterName))
                 {
-                    string[] sharedCandidates = { "Shared Usage", "Bytes compartidos", "Shared Memory" };
-                    _validSharedCounterName = FindWorkingCounterName(_gpuMemCategoryName, instances[0], sharedCandidates);
+                    _validSharedCounterName = TryResolveCounter(_gpuMemCategoryName,
+                        "Shared Usage", "Bytes compartidos", "Shared Memory");
                 }
 
-                // Si falló la búsqueda de nombres, abortamos para no llenar de excepciones
                 if (string.IsNullOrEmpty(_validVramCounterName) || string.IsNullOrEmpty(_validSharedCounterName)) return;
 
-                foreach (var inst in instances)
+                foreach (var inst in instances.Take(8))
                 {
-                    try
-                    {
-                        var vramCounter = new PerformanceCounter(_gpuMemCategoryName, _validVramCounterName, inst);
-                        var sharedCounter = new PerformanceCounter(_gpuMemCategoryName, _validSharedCounterName, inst);
-
-                        vramCounter.NextValue();
-                        sharedCounter.NextValue();
-
-                        _gpuVramCounters.Add(vramCounter);
-                        _gpuSharedCounters.Add(sharedCounter);
-                    }
-                    catch { }
+                    TryAddCounter(_gpuVramCounters, _gpuMemCategoryName, _validVramCounterName, inst, prime: true);
+                    TryAddCounter(_gpuSharedCounters, _gpuMemCategoryName, _validSharedCounterName, inst, prime: true);
                 }
             }
             catch { }
         }
 
-        // Método auxiliar para probar nombres hasta que uno no explote
-        private string FindWorkingCounterName(string category, string? instance, string[] candidates)
+        private static double ReadSum(List<PerformanceCounter> list)
         {
-            if (string.IsNullOrEmpty(instance)) return candidates[0]; // Fallback
+            double total = 0;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var c = list[i];
+                try
+                {
+                    var v = c.NextValue();
+                    if (!double.IsNaN(v) && v >= 0) total += v;
+                }
+                catch
+                {
+                    TryRemoveCounter(list, i--);
+                }
+            }
+            return total;
+        }
 
-            foreach (var counterName in candidates)
+        private static ulong ReadSumUlong(List<PerformanceCounter> list)
+        {
+            ulong total = 0;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var c = list[i];
+                try
+                {
+                    var v = c.NextValue();
+                    if (!double.IsNaN(v) && v >= 0) total += (ulong)v;
+                }
+                catch
+                {
+                    TryRemoveCounter(list, i--);
+                }
+            }
+            return total;
+        }
+
+        private static void TryAddCounter(List<PerformanceCounter> list, string category, string counter, string instance, bool prime)
+        {
+            try
+            {
+                var pc = new PerformanceCounter(category, counter, instance, true);
+                if (prime) { try { pc.NextValue(); } catch { } }
+                list.Add(pc);
+            }
+            catch { }
+        }
+
+        private static void DisposeList(List<PerformanceCounter> list)
+        {
+            foreach (var c in list) { try { c.Dispose(); } catch { } }
+            list.Clear();
+        }
+
+        private static void TryRemoveCounter(List<PerformanceCounter> list, int index)
+        {
+            try { list[index].Dispose(); } catch { }
+            list.RemoveAt(index);
+        }
+
+        private static string TryResolveCategory(params string[] candidates)
+        {
+            try { return PerfCounterHelper.ResolveCategory(candidates); }
+            catch
+            {
+                foreach (var name in candidates)
+                {
+                    try { if (PerformanceCounterCategory.Exists(name)) return name; }
+                    catch { }
+                }
+                return string.Empty;
+            }
+        }
+
+        private static string TryResolveCounter(string category, params string[] candidates)
+        {
+            try { return PerfCounterHelper.ResolveCounter(category, candidates); }
+            catch
             {
                 try
                 {
-                    using var pc = new PerformanceCounter(category, counterName, instance);
-                    pc.NextValue(); // Si esto no lanza excepción, el nombre es válido
-                    return counterName;
+                    var cat = new PerformanceCounterCategory(category);
+                    var instance = cat.GetInstanceNames().FirstOrDefault();
+                    if (string.IsNullOrEmpty(instance)) return candidates[0];
+
+                    foreach (var name in candidates)
+                    {
+                        try
+                        {
+                            using var pc = new PerformanceCounter(category, name, instance, true);
+                            pc.NextValue();
+                            return name;
+                        }
+                        catch { }
+                    }
                 }
-                catch { /* Siguiente candidato */ }
+                catch { }
+                return "";
             }
-            return ""; // Ninguno funcionó
         }
 
         public void Dispose()
         {
-            foreach (var c in _gpu3dCounters) c.Dispose();
-            foreach (var c in _gpuVramCounters) c.Dispose();
-            foreach (var c in _gpuSharedCounters) c.Dispose();
+            DisposeList(_gpuAllEnginesCounters);
+            DisposeList(_gpu3dAggregated);
+            DisposeList(_gpuComputeAggregated);
+            DisposeList(_gpuCopyAggregated);
+            DisposeList(_gpuVdecAggregated);
+            DisposeList(_gpuVencAggregated);
+            DisposeList(_gpuVramCounters);
+            DisposeList(_gpuSharedCounters);
         }
     }
 }
