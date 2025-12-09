@@ -40,13 +40,18 @@ namespace ModernTaskManager.Core.Services.GPU
         private readonly int _minSamplingMs = 250;
 
         // Suavizado sobre total (queremos estabilidad similar a Task Manager)
-        private double _emaTotal = 0;
-        private const double _emaAlpha = 0.35;
+        private double _emaTotal = double.NaN; // sentinel para evitar sesgo inicial
+        private const double _emaAlpha = 0.45; // reacción algo más rápida
 
         // Autocuración cuando el total queda en 0
         private int _zeroStreak = 0;
         private const int ZeroRebuildThreshold = 5;
         private bool _usingAggregatedOnly = true;
+
+        // Pequeña caché DXGI para evitar COM allocations por lectura
+        private DXGIWrapper.DXGIResult? _dxgiCache;
+        private long _dxgiCacheTick;
+        private const int DxgiCacheTtlMs = 1000; // refrescar como Task Manager ~1s
 
         public void Initialize()
         {
@@ -115,9 +120,10 @@ namespace ModernTaskManager.Core.Services.GPU
 
             if (_samplingWatch.IsRunning && _samplingWatch.ElapsedMilliseconds < _minSamplingMs)
             {
+                var ema = double.IsNaN(_emaTotal) ? 0.0 : _emaTotal;
                 return new GpuAdapterDynamicInfo
                 {
-                    GlobalUsagePercent = Math.Min(100.0, _emaTotal),
+                    GlobalUsagePercent = Math.Min(100.0, ema),
                     DedicatedMemoryUsed = 0,
                     SharedMemoryUsed = 0
                 };
@@ -141,11 +147,13 @@ namespace ModernTaskManager.Core.Services.GPU
             double totalAll = ReadSum(_gpuAllEnginesCounters);
 
             // Autocuración si totalAll parece muerto
-            if (totalAll <= 0.1 && threeD <= 0.1 && compute <= 0.1 && copy <= 0.1 && vdec <= 0.1 && venc <= 0.1)
+            bool allFlat = totalAll <= 0.1 && threeD <= 0.1 && compute <= 0.1 && copy <= 0.1 && vdec <= 0.1 && venc <= 0.1;
+            if (allFlat)
             {
                 _zeroStreak++;
                 if (_zeroStreak >= ZeroRebuildThreshold)
                 {
+                    // Forzar fallback per-process y permitir más instancias temporalmente
                     RefreshEngineCounters(forceRebuild: true, fallbackToPerProcess: true);
                     _zeroStreak = 0;
                 }
@@ -160,13 +168,46 @@ namespace ModernTaskManager.Core.Services.GPU
 
             // Para evitar infravalorar en algunos drivers, usar el máximo entre suma y máximo por motor (luego clamped)
             double rawOverall = Math.Max(enginesMax, totalAll);
-            rawOverall = Math.Min(100.0, rawOverall);
 
-            // Suavizado EMA para una gráfica más estable
-            _emaTotal = (_emaTotal == 0) ? rawOverall : (_emaAlpha * rawOverall + (1 - _emaAlpha) * _emaTotal);
+            // Fallback adicional: D3DKMT por delta de running times de nodos
+            if (NodeBusySampler.TrySampleTotalUsagePercent(out var d3dBusyPercent))
+            {
+                if (allFlat && d3dBusyPercent > rawOverall)
+                {
+                    Debug.WriteLine($"[GPU] D3DKMT fallback usado. raw={rawOverall:F2} d3dBusy={d3dBusyPercent:F2}");
+                }
+                rawOverall = Math.Max(rawOverall, d3dBusyPercent);
+            }
 
-            // Memoria
-            ulong vram = ReadSumUlong(_gpuVramCounters);
+            rawOverall = Math.Min(100.0, Math.Max(0.0, rawOverall));
+
+            // Suavizado EMA para una gráfica más estable (inicialización con primera muestra real)
+            _emaTotal = double.IsNaN(_emaTotal)
+                ? rawOverall
+                : (_emaAlpha * rawOverall + (1 - _emaAlpha) * _emaTotal);
+
+            // Memoria: usar caché DXGI para minimizar COM allocations
+            ulong vram = 0;
+            var nowTicks = Stopwatch.GetTimestamp();
+            var msSince = (_dxgiCacheTick == 0) ? long.MaxValue : (long)((nowTicks - _dxgiCacheTick) * 1000.0 / Stopwatch.Frequency);
+            if (_dxgiCache == null || msSince > DxgiCacheTtlMs)
+            {
+                try
+                {
+                    var dxgi = DXGIWrapper.QueryVideoMemoryInfo();
+                    if (dxgi != null && dxgi.Success)
+                    {
+                        _dxgiCache = dxgi;
+                        _dxgiCacheTick = nowTicks;
+                    }
+                }
+                catch { }
+            }
+            if (_dxgiCache != null && _dxgiCache.CurrentUsage > 0)
+                vram = _dxgiCache.CurrentUsage;
+            if (vram == 0)
+                vram = ReadSumUlong(_gpuVramCounters);
+
             ulong shared = ReadSumUlong(_gpuSharedCounters);
 
             return new GpuAdapterDynamicInfo
@@ -215,22 +256,23 @@ namespace ModernTaskManager.Core.Services.GPU
                 {
                     _usingAggregatedOnly = true;
 
-                    foreach (var inst in aggregated)
+                    // Limitar el número de contadores para reducir memoria (8-12 agregados)
+                    foreach (var inst in aggregated.Take(12))
                         TryAddCounter(_gpuAllEnginesCounters, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
 
-                    foreach (var inst in aggregated.Where(i => string.Equals(i, "engtype_3D", StringComparison.OrdinalIgnoreCase)))
+                    foreach (var inst in aggregated.Where(i => string.Equals(i, "engtype_3D", StringComparison.OrdinalIgnoreCase)).Take(1))
                         TryAddCounter(_gpu3dAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
 
-                    foreach (var inst in aggregated.Where(i => i.IndexOf("Compute", StringComparison.OrdinalIgnoreCase) >= 0).Take(8))
+                    foreach (var inst in aggregated.Where(i => i.IndexOf("Compute", StringComparison.OrdinalIgnoreCase) >= 0).Take(4))
                         TryAddCounter(_gpuComputeAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
 
-                    foreach (var inst in aggregated.Where(i => i.IndexOf("Copy", StringComparison.OrdinalIgnoreCase) >= 0).Take(4))
+                    foreach (var inst in aggregated.Where(i => i.IndexOf("Copy", StringComparison.OrdinalIgnoreCase) >= 0).Take(2))
                         TryAddCounter(_gpuCopyAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
 
-                    foreach (var inst in aggregated.Where(i => i.IndexOf("VideoDecode", StringComparison.OrdinalIgnoreCase) >= 0).Take(4))
+                    foreach (var inst in aggregated.Where(i => i.IndexOf("VideoDecode", StringComparison.OrdinalIgnoreCase) >= 0).Take(2))
                         TryAddCounter(_gpuVdecAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
 
-                    foreach (var inst in aggregated.Where(i => i.IndexOf("VideoEncode", StringComparison.OrdinalIgnoreCase) >= 0).Take(4))
+                    foreach (var inst in aggregated.Where(i => i.IndexOf("VideoEncode", StringComparison.OrdinalIgnoreCase) >= 0).Take(2))
                         TryAddCounter(_gpuVencAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
                 }
                 else
@@ -239,25 +281,25 @@ namespace ModernTaskManager.Core.Services.GPU
                     _usingAggregatedOnly = false;
 
                     var perProcessAll = instances.Where(i => i.IndexOf("engtype_", StringComparison.OrdinalIgnoreCase) >= 0)
-                                                .Take(64)
+                                                .Take(24) // 16-24 para menor consumo pero mejor cobertura
                                                 .ToArray();
 
                     foreach (var inst in perProcessAll)
                         TryAddCounter(_gpuAllEnginesCounters, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
 
-                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("engtype_3D", StringComparison.OrdinalIgnoreCase) >= 0).Take(32))
+                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("engtype_3D", StringComparison.OrdinalIgnoreCase) >= 0).Take(8))
                         TryAddCounter(_gpu3dAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
 
-                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("Compute", StringComparison.OrdinalIgnoreCase) >= 0).Take(16))
+                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("Compute", StringComparison.OrdinalIgnoreCase) >= 0).Take(8))
                         TryAddCounter(_gpuComputeAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
 
-                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("Copy", StringComparison.OrdinalIgnoreCase) >= 0).Take(16))
+                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("Copy", StringComparison.OrdinalIgnoreCase) >= 0).Take(8))
                         TryAddCounter(_gpuCopyAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
 
-                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("VideoDecode", StringComparison.OrdinalIgnoreCase) >= 0).Take(16))
+                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("VideoDecode", StringComparison.OrdinalIgnoreCase) >= 0).Take(8))
                         TryAddCounter(_gpuVdecAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
 
-                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("VideoEncode", StringComparison.OrdinalIgnoreCase) >= 0).Take(16))
+                    foreach (var inst in perProcessAll.Where(i => i.IndexOf("VideoEncode", StringComparison.OrdinalIgnoreCase) >= 0).Take(8))
                         TryAddCounter(_gpuVencAggregated, _gpuCategoryName, _validEngineCounterName, inst, prime: true);
                 }
             }
@@ -293,7 +335,7 @@ namespace ModernTaskManager.Core.Services.GPU
 
                 if (string.IsNullOrEmpty(_validVramCounterName) || string.IsNullOrEmpty(_validSharedCounterName)) return;
 
-                foreach (var inst in instances.Take(8))
+                foreach (var inst in instances.Take(4)) // reducir número de instancias para consumo
                 {
                     TryAddCounter(_gpuVramCounters, _gpuMemCategoryName, _validVramCounterName, inst, prime: true);
                     TryAddCounter(_gpuSharedCounters, _gpuMemCategoryName, _validSharedCounterName, inst, prime: true);
@@ -414,6 +456,135 @@ namespace ModernTaskManager.Core.Services.GPU
             DisposeList(_gpuVencAggregated);
             DisposeList(_gpuVramCounters);
             DisposeList(_gpuSharedCounters);
+        }
+
+        // --------- Fallback D3DKMT: delta de tiempos de ejecución por nodos ----------
+        private static class NodeBusySampler
+        {
+            public static bool TrySampleTotalUsagePercent(out double percent)
+            {
+                percent = 0;
+
+                try
+                {
+                    var s1 = Capture();
+                    System.Threading.Thread.Sleep(120);
+                    var s2 = Capture();
+
+                    if (!s1.Valid || !s2.Valid || s1.NodeTimes.Length == 0 || s2.NodeTimes.Length == 0) return false;
+
+                    int n = Math.Min(s1.NodeTimes.Length, s2.NodeTimes.Length);
+                    double deltaNs = (s2.TimestampNs - s1.TimestampNs);
+                    if (deltaNs <= 0) return false;
+
+                    ulong totalDelta = 0;
+                    for (int i = 0; i < n; i++)
+                    {
+                        if (s2.NodeTimes[i] >= s1.NodeTimes[i])
+                            totalDelta += (s2.NodeTimes[i] - s1.NodeTimes[i]);
+                    }
+
+                    double busy = (totalDelta / deltaNs) * 100.0;
+
+                    // Normalización conservadora y clamp
+                    if (busy > 400) busy = busy / 10.0;
+                    if (busy > 100) busy = 100;
+                    if (busy < 0) busy = 0;
+
+                    percent = busy;
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+
+            private readonly struct Snapshot
+            {
+                public readonly bool Valid;
+                public readonly ulong[] NodeTimes;
+                public readonly double TimestampNs;
+
+                public Snapshot(bool valid, ulong[] times, double tsNs)
+                {
+                    Valid = valid;
+                    NodeTimes = times;
+                    TimestampNs = tsNs;
+                }
+            }
+
+            private static Snapshot Capture()
+            {
+                try
+                {
+                    const int BufferSize = 8192;
+                    IntPtr pBuffer = IntPtr.Zero;
+
+                    try
+                    {
+                        pBuffer = System.Runtime.InteropServices.Marshal.AllocHGlobal(BufferSize);
+                        for (int i = 0; i < BufferSize; i++) System.Runtime.InteropServices.Marshal.WriteByte(pBuffer, i, 0);
+
+                        // Type=ADAPTER
+                        System.Runtime.InteropServices.Marshal.WriteInt32(pBuffer, 0, (int)D3DKMT.D3DKMT_QUERYSTATISTICS_ADAPTER);
+
+                        // Escribir LUID del adaptador primario si lo tenemos (offset 4/8)
+                        if (D3DKMT.TryGetPrimaryAdapterHandle(out _, out var luid))
+                        {
+                            System.Runtime.InteropServices.Marshal.WriteInt32(pBuffer, 4, (int)luid.LowPart);
+                            System.Runtime.InteropServices.Marshal.WriteInt32(pBuffer, 8, (int)luid.HighPart);
+                        }
+
+                        uint status = D3DKMT.D3DKMTQueryStatistics(pBuffer);
+                        if (status != D3DKMT.STATUS_SUCCESS)
+                            return new Snapshot(false, Array.Empty<ulong>(), 0);
+
+                        // Intento: NodeCount en offset 16 (coincide con nuestra estructura parcial)
+                        int nodeCount = 0;
+                        try { nodeCount = System.Runtime.InteropServices.Marshal.ReadInt32(pBuffer, 16 + 0); } catch { nodeCount = 0; }
+                        if (nodeCount <= 0 || nodeCount > 64) nodeCount = 8; // suposición conservadora
+
+                        // Buscar bloque plausible de 'nodeCount' ulongs de RunningTime
+                        int[] candidates = new[] { 64, 96, 128, 160, 192, 256, 384, 512, 768, 1024, 1536 };
+
+                        foreach (int off in candidates)
+                        {
+                            if (off + (nodeCount * 8) > BufferSize) continue;
+
+                            var times = new ulong[nodeCount];
+                            bool anyNonZero = false;
+                            for (int i = 0; i < nodeCount; i++)
+                            {
+                                ulong v = SafeReadUInt64(pBuffer, off + i * 8);
+                                times[i] = v;
+                                if (v != 0) anyNonZero = true;
+                            }
+
+                            if (anyNonZero)
+                            {
+                                double tsNs = Stopwatch.GetTimestamp() * (1e9 / Stopwatch.Frequency);
+                                return new Snapshot(true, times, tsNs);
+                            }
+                        }
+
+                        return new Snapshot(false, Array.Empty<ulong>(), 0);
+                    }
+                    finally
+                    {
+                        if (pBuffer != IntPtr.Zero) System.Runtime.InteropServices.Marshal.FreeHGlobal(pBuffer);
+                    }
+                }
+                catch
+                {
+                    return new Snapshot(false, Array.Empty<ulong>(), 0);
+                }
+            }
+
+            private static ulong SafeReadUInt64(IntPtr basePtr, int offset)
+            {
+                try { return unchecked((ulong)System.Runtime.InteropServices.Marshal.ReadInt64(basePtr, offset)); } catch { return 0; }
+            }
         }
     }
 }

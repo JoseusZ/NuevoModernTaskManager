@@ -46,6 +46,7 @@ namespace ModernTaskManager.Core.Services
 
         private readonly List<PerformanceCounter> _networkSentCounters = new();
         private readonly List<PerformanceCounter> _networkReceivedCounters = new();
+        // El contador de ancho de banda es pesado; evitar si no es necesario
         private readonly List<PerformanceCounter> _networkBandwidthCounters = new();
 
         private ulong _totalMemory;
@@ -70,20 +71,20 @@ namespace ModernTaskManager.Core.Services
 
         private void InitializeCpu()
         {
-            try { _cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total"); }
+            try { _cpuCounter = PerfCounterHelper.CreateCpuCounter(); }
             catch
             {
-                try { _cpuCounter = new PerformanceCounter("Procesador", "% de tiempo de procesador", "_Total"); }
+                try { _cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total"); }
                 catch { _cpuCounter = null; }
             }
         }
 
         private void InitializeMemory()
         {
-            try { _memCounter = new PerformanceCounter("Memory", "Available Bytes"); }
+            try { _memCounter = PerfCounterHelper.CreateMemoryCounter(); }
             catch
             {
-                try { _memCounter = new PerformanceCounter("Memoria", "Bytes disponibles"); }
+                try { _memCounter = new PerformanceCounter("Memory", "Available Bytes"); }
                 catch { _memCounter = null; }
             }
         }
@@ -92,23 +93,15 @@ namespace ModernTaskManager.Core.Services
         {
             try
             {
-                if (PerformanceCounterCategory.Exists("PhysicalDisk"))
+                var cat = PerfCounterHelper.ResolveCategory("PhysicalDisk", "Disco físico");
+                if (!string.IsNullOrEmpty(cat))
                 {
-                    _diskIdleTimeCounter = new PerformanceCounter("PhysicalDisk", "% Idle Time", "_Total");
-                    _diskReadCounter = new PerformanceCounter("PhysicalDisk", "Disk Read Bytes/sec", "_Total");
-                    _diskWriteCounter = new PerformanceCounter("PhysicalDisk", "Disk Write Bytes/sec", "_Total");
-                    return;
-                }
-            }
-            catch { }
-
-            try
-            {
-                if (PerformanceCounterCategory.Exists("Disco físico"))
-                {
-                    _diskIdleTimeCounter = new PerformanceCounter("Disco físico", "% de tiempo inactivo", "_Total");
-                    _diskReadCounter = new PerformanceCounter("Disco físico", "Bytes de lectura de disco/s", "_Total");
-                    _diskWriteCounter = new PerformanceCounter("Disco físico", "Bytes de escritura en disco/s", "_Total");
+                    var idleName = PerfCounterHelper.ResolveCounter(cat, "% Idle Time", "% de tiempo inactivo");
+                    var readName = PerfCounterHelper.ResolveCounter(cat, "Disk Read Bytes/sec", "Bytes de lectura de disco/s");
+                    var writeName = PerfCounterHelper.ResolveCounter(cat, "Disk Write Bytes/sec", "Bytes de escritura en disco/s");
+                    _diskIdleTimeCounter = new PerformanceCounter(cat, idleName, "_Total");
+                    _diskReadCounter = new PerformanceCounter(cat, readName, "_Total");
+                    _diskWriteCounter = new PerformanceCounter(cat, writeName, "_Total");
                 }
             }
             catch { }
@@ -116,17 +109,17 @@ namespace ModernTaskManager.Core.Services
 
         private void InitializeNetwork()
         {
-            string? cat = PerformanceCounterCategory.Exists("Network Interface") ? "Network Interface"
-                        : PerformanceCounterCategory.Exists("Interfaz de red") ? "Interfaz de red" : null;
-            if (cat == null) return;
+            string? cat = PerfCounterHelper.ResolveCategory("Network Interface", "Interfaz de red");
+            if (string.IsNullOrEmpty(cat)) return;
 
-            string sentName = cat == "Network Interface" ? "Bytes Sent/sec" : "Bytes enviados/s";
-            string recvName = cat == "Network Interface" ? "Bytes Received/sec" : "Bytes recibidos/s";
-            string bwName = cat == "Network Interface" ? "Current Bandwidth" : "Ancho de banda actual";
+            string sentName = PerfCounterHelper.ResolveCounter(cat, "Bytes Sent/sec", "Bytes enviados/s");
+            string recvName = PerfCounterHelper.ResolveCounter(cat, "Bytes Received/sec", "Bytes recibidos/s");
+            string bwName = PerfCounterHelper.ResolveCounter(cat, "Current Bandwidth", "Ancho de banda actual");
 
             try
             {
                 var category = new PerformanceCounterCategory(cat);
+                int bwAdded = 0;
                 foreach (var inst in category.GetInstanceNames())
                 {
                     var l = inst.ToLowerInvariant();
@@ -136,7 +129,11 @@ namespace ModernTaskManager.Core.Services
                     {
                         _networkSentCounters.Add(new PerformanceCounter(cat, sentName, inst, true));
                         _networkReceivedCounters.Add(new PerformanceCounter(cat, recvName, inst, true));
-                        _networkBandwidthCounters.Add(new PerformanceCounter(cat, bwName, inst, true));
+                        if (bwAdded < 1)
+                        {
+                            _networkBandwidthCounters.Add(new PerformanceCounter(cat, bwName, inst, true));
+                            bwAdded++;
+                        }
                     }
                     catch { }
                 }
@@ -227,9 +224,9 @@ namespace ModernTaskManager.Core.Services
             try
             {
                 double sent = 0, recv = 0, bwBits = 0;
-                foreach (var c in _networkSentCounters) sent += SafeCounter(c);
-                foreach (var c in _networkReceivedCounters) recv += SafeCounter(c);
-                foreach (var c in _networkBandwidthCounters) bwBits += SafeCounter(c);
+                for (int i = 0; i < _networkSentCounters.Count; i++) sent += SafeCounter(_networkSentCounters[i]);
+                for (int i = 0; i < _networkReceivedCounters.Count; i++) recv += SafeCounter(_networkReceivedCounters[i]);
+                for (int i = 0; i < _networkBandwidthCounters.Count; i++) bwBits += SafeCounter(_networkBandwidthCounters[i]);
                 return new NetworkUsageInfo
                 {
                     BytesSentPerSec = sent,

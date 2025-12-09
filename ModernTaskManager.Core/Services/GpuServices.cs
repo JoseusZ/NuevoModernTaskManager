@@ -8,7 +8,8 @@ namespace ModernTaskManager.Core.Services
 {
     public class GpuService : IDisposable
     {
-        private IGpuUsageProvider _provider;
+        private IGpuUsageProvider _primary;
+        private IGpuUsageProvider? _fallback; // NVAPI/ADL/D3DKMT fallback for NVIDIA/legacy drivers
         public GpuDetailInfo StaticInfo { get; private set; }
 
         public GpuService()
@@ -29,7 +30,7 @@ namespace ModernTaskManager.Core.Services
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine("[ÉXITO] ModernGpuProvider cargado correctamente.");
                 Console.ResetColor();
-                _provider = modern;
+                _primary = modern;
             }
             else
             {
@@ -43,7 +44,7 @@ namespace ModernTaskManager.Core.Services
                     Console.ForegroundColor = ConsoleColor.Green;
                     Console.WriteLine("[ÉXITO] ExtremeLegacyGpuProvider cargado (NVAPI/ADL/D3DKMT).");
                     Console.ResetColor();
-                    _provider = extreme;
+                    _primary = extreme;
                 }
                 else
                 {
@@ -53,22 +54,68 @@ namespace ModernTaskManager.Core.Services
                     Console.WriteLine("[ADVERTENCIA] Modern y ExtremeLegacy no disponibles. Cambiando a Legacy (WMI).");
                     Console.ResetColor();
 
-                    _provider = new LegacyGpuProvider();
-                    _provider.Initialize();
+                    _primary = new LegacyGpuProvider();
+                    _primary.Initialize();
                 }
             }
 
-            StaticInfo = _provider.GetStaticInfo();
+            // Si el proveedor primario es Modern, crear fallback ExtremeLegacy para mejorar precisión en NVIDIA/AMD
+            if (_primary is ModernGpuProvider)
+            {
+                var extremeFallback = new ExtremeLegacyGpuProvider();
+                try { extremeFallback.Initialize(); } catch { }
+                if (extremeFallback.IsSupported)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine("[INFO] Activado fallback NVAPI/ADL para ajustar % GPU cuando WDDM subestima.");
+                    Console.ResetColor();
+                    _fallback = extremeFallback;
+                }
+                else
+                {
+                    extremeFallback.Dispose();
+                }
+            }
+
+            StaticInfo = _primary.GetStaticInfo();
         }
 
         public GpuAdapterDynamicInfo GetGpuUsage()
         {
-            try { return _provider.GetUsage(); }
+            try
+            {
+                var primary = _primary.GetUsage();
+
+                // Usar fallback si existe y da un valor más alto y plausible
+                if (_fallback != null)
+                {
+                    var fb = _fallback.GetUsage();
+                    // Tomar el mejor estimador (máximo) dentro de 0..100
+                    if (fb.GlobalUsagePercent > primary.GlobalUsagePercent && fb.GlobalUsagePercent <= 100)
+                    {
+                        // Conservar memoria del primario si es más rica
+                        fb.DedicatedMemoryUsed = primary.DedicatedMemoryUsed != 0 ? primary.DedicatedMemoryUsed : fb.DedicatedMemoryUsed;
+                        fb.SharedMemoryUsed = primary.SharedMemoryUsed != 0 ? primary.SharedMemoryUsed : fb.SharedMemoryUsed;
+                        return fb;
+                    }
+                }
+
+                return primary;
+            }
             catch { return new GpuAdapterDynamicInfo(); }
         }
 
-        public string GetProviderName() => _provider.ProviderName;
+        public string GetProviderName()
+        {
+            if (_fallback != null && _primary is ModernGpuProvider)
+                return $"{_primary.ProviderName} + Fallback";
+            return _primary.ProviderName;
+        }
 
-        public void Dispose() { _provider?.Dispose(); }
+        public void Dispose()
+        {
+            try { _primary?.Dispose(); } catch { }
+            try { _fallback?.Dispose(); } catch { }
+        }
     }
 }

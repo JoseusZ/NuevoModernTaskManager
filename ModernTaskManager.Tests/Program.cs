@@ -56,13 +56,12 @@ namespace ModernTaskManager.Tests
                         DrawBar("Red Total", Math.Min(100, netPercent), 100.0,
                             $"Tot: {FormatBytes(netInfo.TotalBytesPerSec)}/s");
 
-                        // GPU (Adaptado a las nuevas propiedades)
+                        // GPU (Mostrar uso global)
                         ulong totalVram = gpuService.StaticInfo.TotalDedicatedBytes;
                         string vramText = $"{FormatBytes(gpuInfo.DedicatedMemoryUsed)} / {FormatBytes(totalVram)}";
                         double vramPercent = (totalVram > 0) ? (double)gpuInfo.DedicatedMemoryUsed / totalVram * 100.0 : 0;
 
-                        // CORRECCIÓN: Usamos GlobalUsagePercent en lugar de GpuUsagePercent
-                        DrawBar("GPU 3D", gpuInfo.GlobalUsagePercent, 100.0,
+                        DrawBar("GPU Uso", gpuInfo.GlobalUsagePercent, 100.0,
                             $"VRAM: {vramText} ({vramPercent:F0}%) [{gpuService.StaticInfo.Name}]");
 
                         Console.WriteLine(new string('-', 148));

@@ -38,8 +38,12 @@ namespace ModernTaskManager.Core.Services
         private readonly Dictionary<string, (PerformanceCounter active, PerformanceCounter read, PerformanceCounter write)> _diskCounters = new();
         private readonly Dictionary<string, (PerformanceCounter sent, PerformanceCounter recv, PerformanceCounter bw)> _netCounters = new();
 
+        // Reusar scope WMI para evitar overhead
+        private readonly ManagementScope _scope = new ManagementScope(@"\\.\root\cimv2");
+
         public HardwareInfoService()
         {
+            try { _scope.Connect(); } catch { }
             LoadStaticOnce();
             InitializeDynamicCounters();
             RefreshDynamic();
@@ -54,7 +58,7 @@ namespace ModernTaskManager.Core.Services
                 RefreshCpuCoreUsage();
                 RefreshDiskUsage();
                 RefreshNetworkUsage();
-                RefreshGpuAdapterUsage();
+                // Evitar cargar GPU dinámica aquí para ahorrar memoria
             }
         }
 
@@ -79,7 +83,7 @@ namespace ModernTaskManager.Core.Services
             {
                 Cpu = new CpuDetailInfo();
                 CpuList.Clear();
-                using var search = CreateSearcher("SELECT Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed,L2CacheSize,L3CacheSize FROM Win32_Processor");
+                using var search = CreateSearcher(_scope, "SELECT Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed,L2CacheSize,L3CacheSize FROM Win32_Processor");
                 int sockets = 0;
                 foreach (var mo in SafeEnumerate(search))
                 {
@@ -115,7 +119,7 @@ namespace ModernTaskManager.Core.Services
         {
             try
             {
-                using var search = CreateSearcher("SELECT VirtualizationFirmwareEnabled FROM Win32_ComputerSystem");
+                using var search = CreateSearcher(_scope, "SELECT VirtualizationFirmwareEnabled FROM Win32_ComputerSystem");
                 foreach (var mo in SafeEnumerate(search))
                 {
                     var raw = mo["VirtualizationFirmwareEnabled"];
@@ -132,7 +136,7 @@ namespace ModernTaskManager.Core.Services
             Memory.TotalBytes = SystemInfoHelper.GetTotalPhysicalMemory();
             try
             {
-                using var osSearch = CreateSearcher("SELECT TotalVisibleMemorySize,FreePhysicalMemory FROM Win32_OperatingSystem");
+                using var osSearch = CreateSearcher(_scope, "SELECT TotalVisibleMemorySize,FreePhysicalMemory FROM Win32_OperatingSystem");
                 foreach (var mo in SafeEnumerate(osSearch))
                 {
                     ulong totalKb = SafeULong(mo, "TotalVisibleMemorySize");
@@ -142,7 +146,7 @@ namespace ModernTaskManager.Core.Services
                     Memory.InUseBytes = (Memory.TotalBytes > Memory.FreeBytes) ? Memory.TotalBytes - Memory.FreeBytes : 0;
                     break;
                 }
-                using var perfMem = CreateSearcher("SELECT PoolPagedBytes,PoolNonpagedBytes,CacheBytes FROM Win32_PerfFormattedData_PerfOS_Memory");
+                using var perfMem = CreateSearcher(_scope, "SELECT PoolPagedBytes,PoolNonpagedBytes,CacheBytes FROM Win32_PerfFormattedData_PerfOS_Memory");
                 foreach (var mo in SafeEnumerate(perfMem))
                 {
                     Memory.PagedPoolBytes = SafeULong(mo, "PoolPagedBytes");
@@ -163,9 +167,9 @@ namespace ModernTaskManager.Core.Services
                 Gpu = new GpuDetailInfo();
                 GpuList.Clear();
 
-                using var search = CreateSearcher("SELECT Name, DriverVersion, DriverDate, AdapterRAM, PNPDeviceID FROM Win32_VideoController");
+                using var search = CreateSearcher(_scope, "SELECT Name, DriverVersion, DriverDate, AdapterRAM, PNPDeviceID FROM Win32_VideoController");
 
-                foreach (var mo in SafeEnumerate(search))
+                foreach (var mo in SafeEnumerate(search).Take(2)) // limitar para ahorrar memoria
                 {
                     var info = new GpuDetailInfo
                     {
@@ -202,7 +206,7 @@ namespace ModernTaskManager.Core.Services
             try
             {
                 string cleanId = pnpDeviceId.Replace("\\", "\\\\");
-                using var search = CreateSearcher($"SELECT LocationInformation FROM Win32_PnPEntity WHERE DeviceID = '{cleanId}'");
+                using var search = CreateSearcher(_scope, $"SELECT LocationInformation FROM Win32_PnPEntity WHERE DeviceID = '{cleanId}'");
                 foreach (var item in SafeEnumerate(search))
                 {
                     return SafeString(item, "LocationInformation");
@@ -226,7 +230,7 @@ namespace ModernTaskManager.Core.Services
             {
                 Disks.Clear();
                 var physical = new Dictionary<string, (string model, ulong size)>(StringComparer.OrdinalIgnoreCase);
-                using (var diskSearch = CreateSearcher("SELECT DeviceID,Model,Size FROM Win32_DiskDrive"))
+                using (var diskSearch = CreateSearcher(_scope, "SELECT DeviceID,Model,Size FROM Win32_DiskDrive"))
                 {
                     foreach (var mo in SafeEnumerate(diskSearch))
                     {
@@ -236,17 +240,7 @@ namespace ModernTaskManager.Core.Services
                     }
                 }
 
-                // Intento robusto de leer MediaType (SSD/HDD) en Win8+
-                try
-                {
-                    if (!Environment.OSVersion.Version.ToString().StartsWith("6.1"))
-                    {
-                        // Código placeholder para futura implementación de MediaType
-                    }
-                }
-                catch { }
-
-                using var volSearch = CreateSearcher("SELECT DriveLetter,Capacity,FreeSpace FROM Win32_Volume WHERE DriveLetter IS NOT NULL");
+                using var volSearch = CreateSearcher(_scope, "SELECT DriveLetter,Capacity,FreeSpace FROM Win32_Volume WHERE DriveLetter IS NOT NULL");
                 foreach (var mo in SafeEnumerate(volSearch))
                 {
                     var disk = new DiskStaticInfo
@@ -269,8 +263,8 @@ namespace ModernTaskManager.Core.Services
             try
             {
                 NetworkAdapters.Clear();
-                using var search = CreateSearcher("SELECT Name,Speed,MACAddress FROM Win32_NetworkAdapter WHERE NetEnabled = TRUE");
-                foreach (var mo in SafeEnumerate(search))
+                using var search = CreateSearcher(_scope, "SELECT Name,Speed,MACAddress FROM Win32_NetworkAdapter WHERE NetEnabled = TRUE");
+                foreach (var mo in SafeEnumerate(search).Take(10))
                 {
                     var info = new NetworkAdapterStaticInfo
                     {
@@ -308,6 +302,7 @@ namespace ModernTaskManager.Core.Services
                         var pc = new PerformanceCounter("Processor", "% Processor Time", inst, true);
                         pc.NextValue();
                         _cpuCoreCounters.Add(pc);
+                        if (_cpuCoreCounters.Count >= 16) break; // limitar para ahorrar memoria
                     }
                     catch { }
                 }
@@ -332,6 +327,7 @@ namespace ModernTaskManager.Core.Services
                         var write = new PerformanceCounter("PhysicalDisk", "Disk Write Bytes/sec", inst, true);
                         active.NextValue(); read.NextValue(); write.NextValue();
                         _diskCounters[inst] = (active, read, write);
+                        if (_diskCounters.Count >= 8) break; // limitar
                     }
                     catch { }
                 }
@@ -357,6 +353,7 @@ namespace ModernTaskManager.Core.Services
                         var bw = new PerformanceCounter("Network Interface", "Current Bandwidth", inst, true);
                         sent.NextValue(); recv.NextValue(); bw.NextValue();
                         _netCounters[inst] = (sent, recv, bw);
+                        if (_netCounters.Count >= 8) break; // limitar
                     }
                     catch { }
                 }
@@ -437,11 +434,9 @@ namespace ModernTaskManager.Core.Services
         }
 
         // ----------- HELPERS WMI -----------
-        private static ManagementObjectSearcher CreateSearcher(string wql)
+        private static ManagementObjectSearcher CreateSearcher(ManagementScope scope, string wql)
         {
-            var scope = new ManagementScope(@"\\.\root\cimv2");
             var query = new ObjectQuery(wql);
-            // CORRECCIÓN DE AMBIGÜEDAD AQUÍ:
             var options = new System.Management.EnumerationOptions { ReturnImmediately = true, Rewindable = false, DirectRead = true };
             return new ManagementObjectSearcher(scope, query, options);
         }
