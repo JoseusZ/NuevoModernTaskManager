@@ -1,0 +1,4 @@
+﻿[
+  { "Name": "System", "CpuPercent": 0.1, "MemoryMB": 40.5 },
+  { "Name": "Registry", "CpuPercent": 0.0, "MemoryMB": 12.2 }
+]

@@ -1,0 +1,204 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:views="using:ModernTaskManager.UI.Views"
+        xmlns:vm="using:ModernTaskManager.UI.ViewModels"
+        mc:Ignorable="d"
+        d:DesignWidth="1000"
+        d:DesignHeight="600"
+        x:Class="ModernTaskManager.UI.MainWindow"
+
+        Title="{DynamicResource Lang_WindowTitle}"
+        SystemDecorations="None"
+        Background="{DynamicResource WindowBackdropBrush}"
+        WindowStartupLocation="CenterScreen"
+        UseLayoutRounding="True">
+
+	<Window.DataContext>
+		<vm:ProcessesViewModel/>
+	</Window.DataContext>
+
+	<!-- Contenedor principal -->
+	<Border Name="WindowClipHost"
+            Background="{DynamicResource WindowBackdropBrush}"
+            CornerRadius="{DynamicResource WindowCornerRadius}"
+            ClipToBounds="True">
+
+		<Panel>
+
+			<!-- BACKDROP -->
+			<Border Name="MainBackground"
+                    Background="{DynamicResource WindowBackdropBrush}"
+                    CornerRadius="{DynamicResource WindowCornerRadius}"
+                    BorderThickness="0"
+                    ClipToBounds="True">
+
+				<Grid RowDefinitions="32, *">
+
+					<!-- TITLE BAR -->
+					<Grid Grid.Row="0" ColumnDefinitions="*, Auto">
+						<Panel Grid.Column="0"
+                               Name="TitleBarDragArea"
+                               Background="Transparent"
+                               IsHitTestVisible="True">
+
+							<StackPanel Orientation="Horizontal"
+                                        Spacing="10"
+                                        Margin="16,0,0,0"
+                                        VerticalAlignment="Center">
+								<PathIcon Data="{StaticResource Icon_AppDefault}"
+                                          Width="14"
+                                          Height="14"
+                                          Foreground="{DynamicResource AccentBrush}"/>
+								<TextBlock Text="{DynamicResource Lang_WindowTitle}"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+							</StackPanel>
+
+							<Panel.ContextMenu>
+								<ContextMenu>
+									<MenuItem Header="{DynamicResource Lang_Menu_Restore}" Name="ContextRestore">
+										<MenuItem.Icon>
+											<PathIcon Data="{StaticResource Icon_WindowRestore}"/>
+										</MenuItem.Icon>
+									</MenuItem>
+									<MenuItem Header="{DynamicResource Lang_Menu_Move}" IsEnabled="False"/>
+									<MenuItem Header="{DynamicResource Lang_Menu_Size}" IsEnabled="False"/>
+									<MenuItem Header="{DynamicResource Lang_Menu_Minimize}" Name="ContextMinimize">
+										<MenuItem.Icon>
+											<PathIcon Data="{StaticResource Icon_WindowMinimize}"/>
+										</MenuItem.Icon>
+									</MenuItem>
+									<MenuItem Header="{DynamicResource Lang_Menu_Maximize}" Name="ContextMaximize">
+										<MenuItem.Icon>
+											<PathIcon Data="{StaticResource Icon_WindowMaximize}"/>
+										</MenuItem.Icon>
+									</MenuItem>
+									<Separator/>
+									<MenuItem Header="{DynamicResource Lang_Menu_Close}"
+                                              Name="ContextClose"
+                                              InputGesture="Alt+F4">
+										<MenuItem.Icon>
+											<PathIcon Data="{StaticResource Icon_WindowClose}"/>
+										</MenuItem.Icon>
+									</MenuItem>
+								</ContextMenu>
+							</Panel.ContextMenu>
+						</Panel>
+
+						<!-- CAPTION BUTTONS -->
+						<StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="0">
+							<Button Name="MinimizeBtn" Classes="captionButton">
+								<PathIcon Data="{StaticResource Icon_WindowMinimize}"
+                                          Width="10"
+                                          Height="10"
+                                          Foreground="{DynamicResource TextSecondaryBrush}"/>
+							</Button>
+
+							<Button Name="MaximizeRestoreBtn" Classes="captionButton">
+								<Panel>
+									<PathIcon Name="MaxIcon"
+                                              Data="{StaticResource Icon_WindowMaximize}"
+                                              Width="12"
+                                              Height="12"
+                                              IsVisible="True"
+                                              Foreground="{DynamicResource TextSecondaryBrush}"/>
+									<PathIcon Name="RestoreIcon"
+                                              Data="{StaticResource Icon_WindowRestore}"
+                                              Width="12"
+                                              Height="12"
+                                              IsVisible="False"
+                                              Foreground="{DynamicResource TextSecondaryBrush}"/>
+								</Panel>
+							</Button>
+
+							<Button Name="CloseBtn" Classes="captionButtonClose">
+								<PathIcon Data="{StaticResource Icon_WindowClose}"
+                                          Width="10"
+                                          Height="10"/>
+							</Button>
+						</StackPanel>
+					</Grid>
+
+					<!-- CONTENT -->
+					<Grid Grid.Row="1" ColumnDefinitions="48, *">
+
+						<!-- SIDEBAR -->
+						<Border x:Name="SidebarBackground"
+                                Grid.Column="0"
+                                Background="Transparent"
+                                CornerRadius="0,0,0,7">
+							<Grid RowDefinitions="Auto, *, Auto">
+								<Button Grid.Row="0"
+                                        Width="40"
+                                        Height="40"
+                                        Margin="4"
+                                        Background="Transparent">
+									<PathIcon Data="{StaticResource Icon_Hamburger}"
+                                              Width="16"
+                                              Height="16"
+                                              Foreground="{DynamicResource TextSecondaryBrush}"/>
+								</Button>
+
+								<StackPanel Grid.Row="1" Spacing="4" Margin="0,4">
+									<Button Width="40"
+                                            Height="40"
+                                            Margin="4,0"
+                                            Background="Transparent"
+                                            Click="NavigateToProcesses"
+                                            ToolTip.Tip="{DynamicResource Lang_Sidebar_Processes}">
+										<PathIcon Data="{StaticResource Icon_AppDefault}"
+                                                  Width="16"
+                                                  Height="16"
+                                                  Foreground="{DynamicResource AccentBrush}"/>
+									</Button>
+								</StackPanel>
+
+								<Button Grid.Row="2"
+                                        Width="40"
+                                        Height="40"
+                                        Margin="4,0,4,8"
+                                        Background="Transparent"
+                                        Click="NavigateToSettings"
+                                        ToolTip.Tip="{DynamicResource Lang_Sidebar_Settings}">
+									<PathIcon Data="{StaticResource Icon_Settings}"
+                                              Width="18"
+                                              Height="18"
+                                              Foreground="{DynamicResource TextSecondaryBrush}"/>
+								</Button>
+							</Grid>
+						</Border>
+
+						<!-- MAIN CONTENT -->
+						<Border x:Name="ContentBackground"
+                                Grid.Column="1"
+                                Background="{DynamicResource ContentBackgroundBrush}"
+                                CornerRadius="8,0,7,0"
+                                BorderThickness="0">
+							<ContentControl Name="MainContent"/>
+						</Border>
+					</Grid>
+				</Grid>
+			</Border>
+
+			<!-- WINDOW BORDER -->
+			<Border Name="WindowBorder"
+                    BorderBrush="{DynamicResource WindowBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="{DynamicResource WindowCornerRadius}"
+                    IsHitTestVisible="False"/>
+
+			<!-- RESIZE ZONES -->
+			<Border Name="ResizeTop" VerticalAlignment="Top" Height="6" Background="Transparent" Cursor="SizeNorthSouth" IsHitTestVisible="True"/>
+			<Border Name="ResizeBottom" VerticalAlignment="Bottom" Height="6" Background="Transparent" Cursor="SizeNorthSouth" IsHitTestVisible="True"/>
+			<Border Name="ResizeLeft" HorizontalAlignment="Left" Width="6" Background="Transparent" Cursor="SizeWestEast" IsHitTestVisible="True"/>
+			<Border Name="ResizeRight" HorizontalAlignment="Right" Width="6" Background="Transparent" Cursor="SizeWestEast" IsHitTestVisible="True"/>
+			<Border Name="ResizeTopLeft" VerticalAlignment="Top" HorizontalAlignment="Left" Width="6" Height="6" Background="Transparent" Cursor="TopLeftCorner" IsHitTestVisible="True"/>
+			<Border Name="ResizeTopRight" VerticalAlignment="Top" HorizontalAlignment="Right" Width="6" Height="6" Background="Transparent" Cursor="TopRightCorner" IsHitTestVisible="True"/>
+			<Border Name="ResizeBottomLeft" VerticalAlignment="Bottom" HorizontalAlignment="Left" Width="6" Height="6" Background="Transparent" Cursor="BottomLeftCorner" IsHitTestVisible="True"/>
+			<Border Name="ResizeBottomRight" VerticalAlignment="Bottom" HorizontalAlignment="Right" Width="6" Height="6" Background="Transparent" Cursor="BottomRightCorner" IsHitTestVisible="True"/>
+
+		</Panel>
+	</Border>
+</Window>

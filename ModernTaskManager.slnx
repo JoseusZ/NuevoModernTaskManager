@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="ModernTaskManager.Core/ModernTaskManager.Core.csproj" Id="f82b651d-2b50-4c03-844d-51a857f55438" />
+  <Project Path="ModernTaskManager.Tests/ModernTaskManager.Tests.csproj" Id="33c2dbc7-d33a-49ea-a4f4-3e34f6c03c5e" />
+  <Project Path="ModernTaskManager.UI/ModernTaskManager.UI.csproj" Id="9018e9de-817e-4df7-a8f8-de3db6777ceb" />
+</Solution>

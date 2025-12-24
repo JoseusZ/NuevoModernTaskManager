@@ -1,0 +1,61 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <!-- Salida detallada del compilador XAML y opción de lanzar depurador cuando se necesite diagnosticar AVLN:0004 -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <!-- Mostrar mensajes de alta importancia del CompileAvaloniaXamlTask -->
+    <AvaloniaXamlReportImportance>high</AvaloniaXamlReportImportance>
+    <!-- Verificar IL generado para obtener contexto extra en los logs -->
+    <AvaloniaXamlIlVerifyIl>true</AvaloniaXamlIlVerifyIl>
+  </PropertyGroup>
+
+  <!-- Permitir lanzar el depurador del compilador XAML cuando se establezca la variable de entorno -->
+  <PropertyGroup Condition="'$(AVALONIA_XAML_DEBUGGER)' == 'true'">
+    <AvaloniaXamlIlDebuggerLaunch>true</AvaloniaXamlIlDebuggerLaunch>
+  </PropertyGroup>
+
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.0.6" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.0.6" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.0.6" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.0.6" />
+    <!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
+    <PackageReference Condition="'$(Configuration)' == 'Debug'" Include="Avalonia.Diagnostics" Version="11.0.6" />
+  </ItemGroup>
+
+
+  <ItemGroup>
+    <Compile Update="Views\ProcessesView.axaml.cs">
+      <DependentUpon>ProcessesView.axaml</DependentUpon>
+    </Compile>
+    <Compile Update="Views\SettingsView.axaml.cs">
+      <DependentUpon>SettingsView.axaml</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaXaml Remove="Assets\Lang\en-US.axaml" />
+    <AvaloniaXaml Remove="Assets\Lang\es-ES.axaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Update="Assets\Lang\en-US.axaml">
+      <SubType>Designer</SubType>
+    </AvaloniaResource>
+    <AvaloniaResource Update="Assets\Lang\es-ES.axaml">
+      <SubType>Designer</SubType>
+    </AvaloniaResource>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,83 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+	<Styles.Resources>
+		<ResourceDictionary>
+
+			<ResourceDictionary.ThemeDictionaries>
+
+				<!-- ===================== -->
+				<!-- DARK THEME -->
+				<!-- ===================== -->
+				<ResourceDictionary x:Key="Dark">
+
+					<!-- BACKDROP (NO 100% OPACO) -->
+					<!-- 🔧 FIX: permite transparencia simulada en Win7 -->
+					<SolidColorBrush x:Key="WindowBackdropBrush">#B0202020</SolidColorBrush>
+
+					<!-- CHROME / CONTENT (OPACOS A PROPÓSITO) -->
+					<SolidColorBrush x:Key="ChromeBackgroundBrush">#FF202020</SolidColorBrush>
+					<SolidColorBrush x:Key="ContentBackgroundBrush">#FF000000</SolidColorBrush>
+
+					<SolidColorBrush x:Key="HeaderBackgroundBrush">#FF202020</SolidColorBrush>
+					<SolidColorBrush x:Key="SurfaceBrush">#FF2C2C2C</SolidColorBrush>
+
+					<SolidColorBrush x:Key="TextPrimaryBrush">#FFFFFFFF</SolidColorBrush>
+					<SolidColorBrush x:Key="TextSecondaryBrush">#FFD0D0D0</SolidColorBrush>
+					<SolidColorBrush x:Key="DividerBrush">#FF2C333A</SolidColorBrush>
+
+					<!-- 🔧 FIX: borde con alpha suave -->
+					<SolidColorBrush x:Key="WindowBorderBrush">#40000000</SolidColorBrush>
+
+					<SolidColorBrush x:Key="AccentBrush">#FF0078D4</SolidColorBrush>
+
+					<SolidColorBrush x:Key="CaptionHoverBrush">#1FFFFFFF</SolidColorBrush>
+					<SolidColorBrush x:Key="CaptionPressedBrush">#3FFFFFFF</SolidColorBrush>
+				</ResourceDictionary>
+
+				<!-- ===================== -->
+				<!-- LIGHT THEME -->
+				<!-- ===================== -->
+				<ResourceDictionary x:Key="Light">
+
+					<!-- BACKDROP (NO 100% OPACO) -->
+					<!-- 🔧 FIX: transparencia falsa en Win7 -->
+					<SolidColorBrush x:Key="WindowBackdropBrush">#B0F3F3F3</SolidColorBrush>
+
+					<!-- CHROME / CONTENT -->
+					<SolidColorBrush x:Key="ChromeBackgroundBrush">#FFF3F3F3</SolidColorBrush>
+					<SolidColorBrush x:Key="ContentBackgroundBrush">#FFFFFFFF</SolidColorBrush>
+
+					<SolidColorBrush x:Key="HeaderBackgroundBrush">#FFFCFCFC</SolidColorBrush>
+					<SolidColorBrush x:Key="SurfaceBrush">#FFFFFFFF</SolidColorBrush>
+
+					<SolidColorBrush x:Key="TextPrimaryBrush">#FF000000</SolidColorBrush>
+					<SolidColorBrush x:Key="TextSecondaryBrush">#FF505050</SolidColorBrush>
+					<SolidColorBrush x:Key="DividerBrush">#FFE5E5E5</SolidColorBrush>
+
+					<!-- 🔧 FIX -->
+					<SolidColorBrush x:Key="WindowBorderBrush">#20000000</SolidColorBrush>
+
+					<SolidColorBrush x:Key="AccentBrush">#FF0078D4</SolidColorBrush>
+
+					<SolidColorBrush x:Key="CaptionHoverBrush">#10000000</SolidColorBrush>
+					<SolidColorBrush x:Key="CaptionPressedBrush">#20000000</SolidColorBrush>
+				</ResourceDictionary>
+
+			</ResourceDictionary.ThemeDictionaries>
+
+			<!-- WindowCornerRadius se establece dinámicamente por BackdropService según la versión de Windows -->
+			<!-- NO definir aquí para evitar sobrescribir el valor calculado -->
+
+			<FontFamily x:Key="StandardFont">
+				Segoe UI Variable Display, Segoe UI, sans-serif
+			</FontFamily>
+
+		</ResourceDictionary>
+	</Styles.Resources>
+
+	<Style Selector="TextBlock">
+		<Setter Property="FontFamily" Value="{StaticResource StandardFont}"/>
+	</Style>
+
+</Styles>

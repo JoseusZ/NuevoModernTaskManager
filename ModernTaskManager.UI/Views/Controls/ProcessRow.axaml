@@ -1,0 +1,56 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:ModernTaskManager.UI.Controls"
+             xmlns:m="using:ModernTaskManager.UI.Models"
+             xmlns:vc="using:ModernTaskManager.UI.Views.Controls"
+             x:Class="ModernTaskManager.UI.Views.Controls.ProcessRow"
+             x:DataType="m:ProcessModel">
+
+    <Border Name="RowBorder" CornerRadius="4" Height="36" Background="Transparent" Margin="4,0">
+        <Border.Styles>
+            <Style Selector="Border#RowBorder:pointerover">
+                <Setter Property="Background" Value="{DynamicResource RowHoverBrush}"/>
+            </Style>
+        </Border.Styles>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="20"/> <ColumnDefinition Width="*" MinWidth="200" SharedSizeGroup="ColName"/>
+                <ColumnDefinition Width="80" SharedSizeGroup="ColStatus"/>
+                <ColumnDefinition Width="80" SharedSizeGroup="ColCPU"/>
+                <ColumnDefinition Width="90" SharedSizeGroup="ColMem"/>
+                <ColumnDefinition Width="90" SharedSizeGroup="ColDisk"/>
+                <ColumnDefinition Width="90" SharedSizeGroup="ColNet"/>
+                <ColumnDefinition Width="20"/> </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <Panel Width="16" Height="16">
+                    <PathIcon Data="{StaticResource Icon_AppDefault}" Foreground="{DynamicResource AccentBrush}" 
+                              IsVisible="{Binding !IsBackground}"/>
+                    <PathIcon Data="{StaticResource Icon_Settings}" Foreground="Gray" 
+                              IsVisible="{Binding IsBackground}"/>
+                </Panel>
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" FontSize="13"/>
+            </StackPanel>
+
+            <Panel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <PathIcon Data="{StaticResource Icon_Leaf}" Width="12" Height="12" Foreground="#57C75C"
+                          IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                </Panel>
+
+            <c:UsageCell Grid.Column="3" Value="{Binding CpuPercent}" TextSuffix="%"/>
+            <c:UsageCell Grid.Column="4" Value="{Binding MemoryMB}" TextSuffix=" MB"/>
+            <c:UsageCell Grid.Column="5" Value="{Binding DiskMbps}" TextSuffix=" MB/s"/>
+            <c:UsageCell Grid.Column="6" Value="{Binding NetworkMbps}" TextSuffix=" Mbps"/>
+        </Grid>
+        
+        <Border.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="Finalizar tarea" Command="{Binding $parent[vc:ProcessRow].EndTaskCommand}"/>
+                <Separator/>
+                <MenuItem Header="Modo de eficiencia"/>
+                <MenuItem Header="Valores de recursos" />
+            </ContextMenu>
+        </Border.ContextMenu>
+    </Border>
+</UserControl>

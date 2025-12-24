@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ModernTaskManager.UI.Controls.CPUUsageBar">
+    <Border CornerRadius="4" Background="{DynamicResource UsageBarBackground}" Height="22" ClipToBounds="True">
+        <Panel>
+            <Border x:Name="FillBorder" CornerRadius="4" HorizontalAlignment="Left" Width="0">
+                <Border.Transitions>
+                    <Transitions>
+                        <DoubleTransition Property="Width" Duration="0:0:0.150" Easing="CubicEaseOut"/>
+                        <BrushTransition Property="Background" Duration="0:0:0.200"/>
+                    </Transitions>
+                </Border.Transitions>
+            </Border>
+            <TextBlock x:Name="ValueText" 
+                       Text="0%" 
+                       VerticalAlignment="Center" 
+                       HorizontalAlignment="Left" 
+                       Margin="6,0,0,0"
+                       FontSize="11"
+                       FontWeight="SemiBold"/>
+        </Panel>
+    </Border>
+</UserControl>

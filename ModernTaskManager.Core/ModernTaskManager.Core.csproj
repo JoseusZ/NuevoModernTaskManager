@@ -1,0 +1,77 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0-windows7.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <UseWindowsForms>false</UseWindowsForms>
+    <UseWPF>false</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <AssemblyTitle>ModernTaskManager.Core</AssemblyTitle>
+    <AssemblyDescription>Core library for Modern Task Manager</AssemblyDescription>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Copyright>Copyright © 2025</Copyright>
+    <RootNamespace>ModernTaskManager.Core</RootNamespace>
+    <AssemblyName>ModernTaskManager.Core</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'">
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)'=='Release'">
+    <DefineConstants>TRACE</DefineConstants>
+    <OutputPath>bin\Release\</OutputPath>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Management" Version="7.0.2" />
+    <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="6.0.1" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Helpers\ByteFormatHelper.cs" />
+    <Compile Include="Helpers\PerfCounterHelper.cs" />
+    <Compile Include="Helpers\SystemInfoHelper.cs" />
+    <Compile Include="Helpers\WindowHelper.cs" />
+    <Compile Include="Models\HardwareModels.cs" />
+    <Compile Include="Models\ProcessInfo.cs" />
+    <Compile Include="Models\ServiceInfo.cs" />
+    <Compile Include="Native\D3DKMT.cs" />
+    <Compile Include="Native\DXGIWrapper.cs" />
+    <Compile Include="Helpers\IconHelper.cs" />
+    <Compile Include="Native\User32.cs" />
+    <Compile Include="Services\GpuServices.cs" />
+    <Compile Include="Services\GPU\ExtremeLegacyGpuProvider.cs" />
+    <Compile Include="Services\GPU\GpuEngineAggregator.cs" />
+    <Compile Include="Services\GPU\GpuMetricsService.cs" />
+    <Compile Include="Services\GPU\IGpuUsageProvider.cs" />
+    <Compile Include="Services\GPU\LegacyGpuProvider.cs" />
+    <Compile Include="Services\GPU\LegacyGpuProvider.Wmi.cs" />
+    <Compile Include="Services\GPU\ModernGpuProvider.cs" />
+    <Compile Include="Services\HardwareInfoService.cs" />
+    <Compile Include="Services\WindowsServiceManager.cs" />
+    <Compile Include="Native\AdvApi32.cs" />
+    <Compile Include="Native\Kernel32.cs" />
+    <Compile Include="Native\NtDll.cs" />
+    <Compile Include="Services\PerformanceService.cs" />
+    <Compile Include="Services\ProcessService.cs" />
+    <Compile Include="Services\SystemMonitor.cs" />
+    <Compile Include="Helpers\WindowsVersion.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Properties\" />
+  </ItemGroup>
+
+</Project>

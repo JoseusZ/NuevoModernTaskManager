@@ -1,0 +1,83 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    
+    <Style Selector="Button.captionButton">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Width" Value="46"/>
+        <Setter Property="Height" Value="32"/>
+        <Setter Property="VerticalAlignment" Value="Top"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Border Background="{TemplateBinding Background}">
+                    <ContentPresenter Content="{TemplateBinding Content}"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"/>
+                </Border>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
+    <Style Selector="Button.captionButton:pointerover">
+        <Setter Property="Background" Value="{DynamicResource CaptionHoverBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    </Style>
+    
+    <Style Selector="Button.captionButton:pressed">
+        <Setter Property="Background" Value="{DynamicResource CaptionPressedBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    </Style>
+
+    <!-- Heredar Foreground del botón al PathIcon en hover/pressed -->
+    <Style Selector="Button.captionButton:pointerover PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    </Style>
+    
+    <Style Selector="Button.captionButton:pressed PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    </Style>
+
+    <Style Selector="Button.captionButtonClose">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Width" Value="47"/>
+        <Setter Property="Height" Value="32"/>
+        <Setter Property="VerticalAlignment" Value="Top"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Border Name="CloseBorder" 
+                        Background="{TemplateBinding Background}" 
+                        CornerRadius="0,7,0,0"> 
+                    <ContentPresenter Content="{TemplateBinding Content}"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"/>
+                </Border>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
+    <Style Selector="Button.captionButtonClose:pointerover">
+        <Setter Property="Background" Value="#E81123"/>
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+    
+    <Style Selector="Button.captionButtonClose:pressed">
+        <Setter Property="Background" Value="#CC0C1A"/>
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+
+    <!-- Heredar Foreground del botón Close al PathIcon en hover/pressed -->
+    <Style Selector="Button.captionButtonClose:pointerover PathIcon">
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+    
+    <Style Selector="Button.captionButtonClose:pressed PathIcon">
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+
+    <Style Selector="Button.captionButtonClose.maximized /template/ Border#CloseBorder">
+        <Setter Property="CornerRadius" Value="0"/>
+    </Style>
+</Styles>

@@ -1,0 +1,34 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <x:String x:Key="Lang_Sidebar_Processes">Procesos</x:String>
+    <x:String x:Key="Lang_Sidebar_Settings">Configuraci&#243;n</x:String>
+    
+    <x:String x:Key="Lang_WindowTitle">Administrador de Tareas</x:String>
+
+    <x:String x:Key="Lang_Search_Placeholder">Escribe un nombre, editor o PID...</x:String>
+
+    <x:String x:Key="Lang_Header_Name">Nombre</x:String>
+    <x:String x:Key="Lang_Header_Status">Estado</x:String>
+    <x:String x:Key="Lang_Header_CPU">CPU</x:String>
+    <x:String x:Key="Lang_Header_Memory">Memoria</x:String>
+    <x:String x:Key="Lang_Header_Disk">Disco</x:String>
+    <x:String x:Key="Lang_Header_Network">Red</x:String>
+
+    <x:String x:Key="Lang_Menu_Restore">Restaurar</x:String>
+    <x:String x:Key="Lang_Menu_Move">Mover</x:String>
+    <x:String x:Key="Lang_Menu_Size">Tama&#241;o</x:String>
+    <x:String x:Key="Lang_Menu_Minimize">Minimizar</x:String>
+    <x:String x:Key="Lang_Menu_Maximize">Maximizar</x:String>
+    <x:String x:Key="Lang_Menu_Close">Cerrar</x:String>
+    <x:String x:Key="Lang_Menu_EndTask">Finalizar tarea</x:String>
+    <x:String x:Key="Lang_Menu_RunNewTask">Ejecutar nueva tarea</x:String>
+
+    <x:String x:Key="Lang_Settings_Title">Configuraci&#243;n</x:String>
+    <x:String x:Key="Lang_Settings_Appearance">Apariencia</x:String>
+    <x:String x:Key="Lang_Settings_AppTheme">Tema de la aplicaci&#243;n</x:String>
+    <x:String x:Key="Lang_Settings_AppThemeDesc">Selecciona el tema de la aplicaci&#243;n que se va a mostrar</x:String>
+
+    <x:String x:Key="Lang_Theme_System">Usar la configuraci&#243;n del sistema</x:String>
+    <x:String x:Key="Lang_Theme_Light">Claro</x:String>
+    <x:String x:Key="Lang_Theme_Dark">Oscuro</x:String>
+</ResourceDictionary>
