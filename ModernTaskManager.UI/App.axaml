@@ -6,5 +6,6 @@
         <StyleInclude Source="/Styles/Theme.axaml"/>
         <StyleInclude Source="/Styles/Icons.axaml"/> 
         <StyleInclude Source="/Styles/WindowCaptionStyles.axaml"/>
+        
     </Application.Styles>
 </Application>

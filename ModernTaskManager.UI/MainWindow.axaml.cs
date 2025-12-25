@@ -26,6 +26,10 @@ public partial class MainWindow : Window
     private MenuItem? _ctxClose;
 
     private Panel? _titleBar;
+    private TextBlock? _windowTitleText;
+    private TextBox? _searchBox;
+    private Button? _searchButton;
+    private bool _isSearchExpanded = false;
 
     public MainWindow()
     {
@@ -39,6 +43,21 @@ public partial class MainWindow : Window
         _restoreIcon = this.FindControl<PathIcon>("RestoreIcon");
         _mainContent = this.FindControl<ContentControl>("MainContent");
         _titleBar = this.FindControl<Panel>("TitleBarDragArea");
+
+        _windowTitleText = this.FindControl<TextBlock>("WindowTitleText");
+        _searchBox = this.FindControl<TextBox>("SearchBox");
+        _searchButton = this.FindControl<Button>("SearchButton");
+
+        // Configurar lógica de búsqueda responsiva
+        if (_searchButton != null)
+        {
+            _searchButton.Click += OnSearchButtonClick;
+        }
+
+        if (_searchBox != null)
+        {
+            _searchBox.LostFocus += OnSearchBoxLostFocus;
+        }
 
         _ctxRestore = this.FindControl<MenuItem>("ContextRestore");
         _ctxMinimize = this.FindControl<MenuItem>("ContextMinimize");
@@ -69,7 +88,10 @@ public partial class MainWindow : Window
             _clipHost.PropertyChanged += (_, e) =>
             {
                 if (e.Property == BoundsProperty)
+                {
                     ApplyCornerClip();
+                    UpdateResponsiveLayout();
+                }
             };
         }
 
@@ -113,8 +135,74 @@ public partial class MainWindow : Window
 
     private void OnThemeVariantChanged(object? sender, EventArgs e)
     {
-        BackdropService.Apply(this, _mainBackground);
+        // Solo re-aplicar backdrop para versiones que no manejan el cambio internamente
+        var version = BackdropService.GetWindowsVersion();
+        if (version != WindowsVersion.Windows10 && version != WindowsVersion.Windows11)
+        {
+            BackdropService.Apply(this, _mainBackground);
+        }
         ApplyCornerClip();
+    }
+
+    private void UpdateResponsiveLayout()
+    {
+        if (_windowTitleText == null || _searchBox == null || _searchButton == null) return;
+
+        double width = Bounds.Width;
+        
+        // Ignorar si el ancho no es válido aún
+        if (width <= 0) return;
+        
+        // Umbral para modo compacto (cuando el título choca con la barra)
+        // Calculado: Centro (Width/2) - MitadBarra (150) < AnchoTitulo (~200) => Width < 700
+        // Usamos 700 como punto de quiebre seguro
+        bool isCompact = width < 700;
+
+        // Ocultar título en modo compacto
+        _windowTitleText.IsVisible = !isCompact;
+
+        if (isCompact)
+        {
+            // En modo compacto:
+            // Si NO está expandido -> Mostrar botón (alineado a la izquierda), ocultar caja
+            // Si ESTÁ expandido -> Mostrar caja (centrada), ocultar botón
+            if (!_isSearchExpanded)
+            {
+                _searchBox.IsVisible = false;
+                _searchButton.IsVisible = true;
+            }
+            else
+            {
+                _searchBox.IsVisible = true;
+                _searchButton.IsVisible = false;
+            }
+        }
+        else
+        {
+            // En modo normal: Siempre mostrar caja, ocultar botón
+            _isSearchExpanded = false;
+            _searchBox.IsVisible = true;
+            _searchButton.IsVisible = false;
+        }
+    }
+
+    private void OnSearchButtonClick(object? sender, RoutedEventArgs e)
+    {
+        _isSearchExpanded = true;
+        UpdateResponsiveLayout();
+        _searchBox?.Focus();
+    }
+
+    private void OnSearchBoxLostFocus(object? sender, RoutedEventArgs e)
+    {
+        // Si estamos en modo compacto y perdemos el foco, colapsar
+        if (Bounds.Width < 750)
+        {
+            // Pequeño delay para permitir clicks en elementos dentro de la caja si los hubiera
+            // o simplemente colapsar
+            _isSearchExpanded = false;
+            UpdateResponsiveLayout();
+        }
     }
 
     private void SetupResizeDrag(string controlName, WindowEdge edge)
@@ -158,6 +246,10 @@ public partial class MainWindow : Window
 
         CornerRadius chromeRadius = GetWindowCornerRadius();
 
+        // Detectar si es Windows 11 para ajustar el borde
+        var windowsVersion = BackdropService.GetWindowsVersion();
+        bool isWindows11 = windowsVersion == WindowsVersion.Windows11;
+
         if (isMaximized)
         {
             if (_clipHost != null)
@@ -195,8 +287,9 @@ public partial class MainWindow : Window
             if (_windowBorder != null)
             {
                 _windowBorder.CornerRadius = chromeRadius;
-                // Mostrar borde en todas las versiones cuando no está maximizado
-                _windowBorder.BorderThickness = new Thickness(1);
+                // En Windows 11, no mostrar borde personalizado (el DWM lo maneja)
+                // En otras versiones, mostrar borde de 1px
+                _windowBorder.BorderThickness = isWindows11 ? new Thickness(0) : new Thickness(1);
             }
 
             closeBtn?.Classes.Remove("maximized");
@@ -295,7 +388,7 @@ public partial class MainWindow : Window
     private void OnTitleBarPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         var point = e.GetCurrentPoint(this);
-        
+
         // Solo manejar clic izquierdo; el menú contextual lo maneja Avalonia automáticamente
         if (point.Properties.IsLeftButtonPressed)
         {

@@ -22,7 +22,7 @@
     <x:String x:Key="Lang_Menu_Close">Close</x:String>
     <x:String x:Key="Lang_Menu_EndTask">End task</x:String>
     <x:String x:Key="Lang_Menu_RunNewTask">Run new task</x:String>
-    <x:String x:Key="Lang_Search_Placeholder">Type a name, publisher or PID...</x:String>
+    <x:String x:Key="Lang_Search_Placeholder">Type a name, publisher or PID to search</x:String>
     <x:String x:Key="Lang_Menu_Move">Move</x:String>
     <x:String x:Key="Lang_Menu_Size">Size</x:String>
 

@@ -5,7 +5,7 @@
     
     <x:String x:Key="Lang_WindowTitle">Administrador de Tareas</x:String>
 
-    <x:String x:Key="Lang_Search_Placeholder">Escribe un nombre, editor o PID...</x:String>
+    <x:String x:Key="Lang_Search_Placeholder">Escribe un nombre, editor o PID para buscar</x:String>
 
     <x:String x:Key="Lang_Header_Name">Nombre</x:String>
     <x:String x:Key="Lang_Header_Status">Estado</x:String>

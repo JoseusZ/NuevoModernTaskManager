@@ -13,7 +13,9 @@
         SystemDecorations="None"
         Background="{DynamicResource WindowBackdropBrush}"
         WindowStartupLocation="CenterScreen"
-        UseLayoutRounding="True">
+        UseLayoutRounding="True"
+        MinWidth="600"
+        MinHeight="400">
 
 	<Window.DataContext>
 		<vm:ProcessesViewModel/>
@@ -34,29 +36,15 @@
                     BorderThickness="0"
                     ClipToBounds="True">
 
-				<Grid RowDefinitions="32, *">
+				<Grid RowDefinitions="48, *">
 
 					<!-- TITLE BAR -->
-					<Grid Grid.Row="0" ColumnDefinitions="*, Auto">
-						<Panel Grid.Column="0"
-                               Name="TitleBarDragArea"
+					<Grid Grid.Row="0">
+                        <!-- Drag Area (Background) -->
+						<Panel Name="TitleBarDragArea"
                                Background="Transparent"
                                IsHitTestVisible="True">
-
-							<StackPanel Orientation="Horizontal"
-                                        Spacing="10"
-                                        Margin="16,0,0,0"
-                                        VerticalAlignment="Center">
-								<PathIcon Data="{StaticResource Icon_AppDefault}"
-                                          Width="14"
-                                          Height="14"
-                                          Foreground="{DynamicResource AccentBrush}"/>
-								<TextBlock Text="{DynamicResource Lang_WindowTitle}"
-                                           FontSize="12"
-                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
-							</StackPanel>
-
-							<Panel.ContextMenu>
+                            <Panel.ContextMenu>
 								<ContextMenu>
 									<MenuItem Header="{DynamicResource Lang_Menu_Restore}" Name="ContextRestore">
 										<MenuItem.Icon>
@@ -85,40 +73,127 @@
 									</MenuItem>
 								</ContextMenu>
 							</Panel.ContextMenu>
-						</Panel>
+                        </Panel>
 
-						<!-- CAPTION BUTTONS -->
-						<StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="0">
-							<Button Name="MinimizeBtn" Classes="captionButton">
-								<PathIcon Data="{StaticResource Icon_WindowMinimize}"
-                                          Width="10"
-                                          Height="10"
-                                          Foreground="{DynamicResource TextSecondaryBrush}"/>
-							</Button>
+                        <!-- Title Bar Content -->
+                        <Grid ColumnDefinitions="Auto, *, Auto">
+                            
+                            <!-- Icon & Title -->
+							<StackPanel Grid.Column="0" 
+                                        Orientation="Horizontal"
+                                        Spacing="10"
+                                        Margin="16,0,0,0"
+                                        VerticalAlignment="Center"
+                                        IsHitTestVisible="False">
+								<PathIcon Data="{StaticResource Icon_AppDefault}"
+                                          Width="16"
+                                          Height="16"
+                                          Foreground="{DynamicResource AccentBrush}"/>
+								<TextBlock Name="WindowTitleText"
+                                           Text="{DynamicResource Lang_WindowTitle}"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+							</StackPanel>
 
-							<Button Name="MaximizeRestoreBtn" Classes="captionButton">
-								<Panel>
-									<PathIcon Name="MaxIcon"
-                                              Data="{StaticResource Icon_WindowMaximize}"
-                                              Width="12"
-                                              Height="12"
-                                              IsVisible="True"
+                            <!-- Search Bar (Centered) -->
+                            <Panel Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center">
+                                <TextBox Name="SearchBox"
+                                         Watermark="{DynamicResource Lang_Search_Placeholder}"
+                                         MaxWidth="500"
+                                         MinWidth="100"
+                                         Height="32"
+                                         CornerRadius="4"
+                                         VerticalAlignment="Center"
+                                         HorizontalAlignment="Stretch"
+                                         VerticalContentAlignment="Center"
+                                         BorderThickness="1">
+                                    <TextBox.InnerLeftContent>
+                                        <PathIcon Data="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"
+                                                  Width="12"
+                                                  Height="12"
+                                                  Margin="10,0,4,0"
+                                                  Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    </TextBox.InnerLeftContent>
+                                    <TextBox.Styles>
+                                        <!-- Estilo para el Watermark con puntos suspensivos -->
+                                        <Style Selector="TextBox /template/ TextBlock#PART_Watermark">
+                                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                            <Setter Property="TextWrapping" Value="NoWrap"/>
+                                        </Style>
+
+                                        <!-- Estilo base para dar efecto de relieve/profundidad -->
+                                        <Style Selector="TextBox">
+                                            <!-- Fondo semitransparente oscuro para que resalte sobre el Mica -->
+                                            <Setter Property="Background" Value="#0D000000"/>
+                                            <!-- Borde sutil -->
+                                            <Setter Property="BorderBrush" Value="#1A000000"/>
+                                        </Style>
+                                        
+                                        <!-- Estado Hover: Un poco más claro -->
+                                        <Style Selector="TextBox:pointerover /template/ Border#PART_BorderElement">
+                                            <Setter Property="Background" Value="#15000000"/>
+                                            <Setter Property="BorderBrush" Value="#25000000"/>
+                                        </Style>
+
+                                        <!-- Estado Focus: Fondo sólido (input active) y línea de acento -->
+                                        <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+                                            <Setter Property="Background" Value="{DynamicResource ControlFillColorInputActiveBrush}"/>
+                                            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                                            <Setter Property="BorderThickness" Value="0,0,0,2"/>
+                                        </Style>
+                                    </TextBox.Styles>
+                                </TextBox>
+
+                                <!-- Search Button (Collapsed Mode) -->
+                                <Button Name="SearchButton"
+                                        Width="32"
+                                        Height="32"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        IsVisible="False"
+                                        HorizontalAlignment="Left"
+                                        Margin="10,0,0,0"
+                                        VerticalAlignment="Center">
+                                    <PathIcon Data="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"
+                                              Width="16"
+                                              Height="16"
                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
-									<PathIcon Name="RestoreIcon"
-                                              Data="{StaticResource Icon_WindowRestore}"
-                                              Width="12"
-                                              Height="12"
-                                              IsVisible="False"
-                                              Foreground="{DynamicResource TextSecondaryBrush}"/>
-								</Panel>
-							</Button>
+                                </Button>
+                            </Panel>
 
-							<Button Name="CloseBtn" Classes="captionButtonClose">
-								<PathIcon Data="{StaticResource Icon_WindowClose}"
-                                          Width="10"
-                                          Height="10"/>
-							</Button>
-						</StackPanel>
+						    <!-- CAPTION BUTTONS -->
+						    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="0">
+							    <Button Name="MinimizeBtn" Classes="captionButton">
+								    <PathIcon Data="{StaticResource Icon_WindowMinimize}"
+                                              Width="10"
+                                              Height="10"
+                                              Foreground="{DynamicResource TextSecondaryBrush}"/>
+							    </Button>
+
+							    <Button Name="MaximizeRestoreBtn" Classes="captionButton">
+								    <Panel>
+									    <PathIcon Name="MaxIcon"
+                                                  Data="{StaticResource Icon_WindowMaximize}"
+                                                  Width="12"
+                                                  Height="12"
+                                                  IsVisible="True"
+                                                  Foreground="{DynamicResource TextSecondaryBrush}"/>
+									    <PathIcon Name="RestoreIcon"
+                                                  Data="{StaticResource Icon_WindowRestore}"
+                                                  Width="12"
+                                                  Height="12"
+                                                  IsVisible="False"
+                                                  Foreground="{DynamicResource TextSecondaryBrush}"/>
+								    </Panel>
+							    </Button>
+
+							    <Button Name="CloseBtn" Classes="captionButtonClose">
+								    <PathIcon Data="{StaticResource Icon_WindowClose}"
+                                              Width="10"
+                                              Height="10"/>
+							    </Button>
+						    </StackPanel>
+                        </Grid>
 					</Grid>
 
 					<!-- CONTENT -->
