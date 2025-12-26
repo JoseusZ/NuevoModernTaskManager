@@ -34,6 +34,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Remove="Properties\**" />
+    <None Remove="Properties\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="System.Management" Version="7.0.2" />
     <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="6.0.1" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
@@ -68,10 +73,6 @@
     <Compile Include="Services\ProcessService.cs" />
     <Compile Include="Services\SystemMonitor.cs" />
     <Compile Include="Helpers\WindowsVersion.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Properties\" />
   </ItemGroup>
 
 </Project>

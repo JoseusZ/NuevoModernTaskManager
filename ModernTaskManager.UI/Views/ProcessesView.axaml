@@ -54,7 +54,10 @@
                     </Grid>
                 </Border>
 
-                <ScrollViewer Grid.Row="1">
+                <ScrollViewer Grid.Row="1"
+                              Name="ProcessScrollViewer"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding Processes}">
                          <ItemsControl.ItemTemplate>
                             <DataTemplate>

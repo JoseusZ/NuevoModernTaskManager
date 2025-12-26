@@ -33,6 +33,13 @@
 
 					<SolidColorBrush x:Key="CaptionHoverBrush">#1FFFFFFF</SolidColorBrush>
 					<SolidColorBrush x:Key="CaptionPressedBrush">#3FFFFFFF</SolidColorBrush>
+
+					<!-- ScrollBar Colors (Dark) -->
+					<SolidColorBrush x:Key="ScrollBarThumbBrush">#60FFFFFF</SolidColorBrush>
+					<SolidColorBrush x:Key="ScrollBarThumbHoverBrush">#99FFFFFF</SolidColorBrush>
+					<SolidColorBrush x:Key="ScrollBarTrackBrush">#18FFFFFF</SolidColorBrush>
+					<SolidColorBrush x:Key="ScrollBarTrackHoverBrush">#25FFFFFF</SolidColorBrush>
+					<SolidColorBrush x:Key="ScrollBarArrowBrush">#99FFFFFF</SolidColorBrush>
 				</ResourceDictionary>
 
 				<!-- ===================== -->
@@ -62,6 +69,13 @@
 
 					<SolidColorBrush x:Key="CaptionHoverBrush">#10000000</SolidColorBrush>
 					<SolidColorBrush x:Key="CaptionPressedBrush">#20000000</SolidColorBrush>
+
+					<!-- ScrollBar Colors (Light) -->
+					<SolidColorBrush x:Key="ScrollBarThumbBrush">#60000000</SolidColorBrush>
+					<SolidColorBrush x:Key="ScrollBarThumbHoverBrush">#99000000</SolidColorBrush>
+					<SolidColorBrush x:Key="ScrollBarTrackBrush">#12000000</SolidColorBrush>
+					<SolidColorBrush x:Key="ScrollBarTrackHoverBrush">#20000000</SolidColorBrush>
+					<SolidColorBrush x:Key="ScrollBarArrowBrush">#99000000</SolidColorBrush>
 				</ResourceDictionary>
 
 			</ResourceDictionary.ThemeDictionaries>
@@ -79,58 +93,5 @@
 	<Style Selector="TextBlock">
 		<Setter Property="FontFamily" Value="{StaticResource StandardFont}"/>
 	</Style>
-
-	<Style Selector="ScrollBar">
-    <Setter Property="AllowAutoHide" Value="False" />
-</Style>
-
-<Style Selector="ScrollBar:vertical">
-    <Setter Property="Width" Value="12" />
-</Style>
-
-<Style Selector="ScrollBar:vertical /template/ Border#TrackRoot">
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="10" />
-</Style>
-
-<Style Selector="ScrollBar:vertical /template/ Thumb">
-    <Setter Property="Background" Value="#4DFFFFFF" /> <Setter Property="CornerRadius" Value="20" /> <Setter Property="Width" Value="1" /> <Setter Property="MinWidth" Value="1" />
-    <Setter Property="HorizontalAlignment" Value="Center" />
-    <Setter Property="Transitions">
-        <Transitions>
-            <DoubleTransition Property="Width" Duration="0:0:0.1" />
-            <DoubleTransition Property="Opacity" Duration="0:0:0.1" />
-        </Transitions>
-    </Setter>
-</Style>
-
-<Style Selector="ScrollBar /template/ RepeatButton">
-    <Setter Property="IsVisible" Value="True" />
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="Padding" Value="0" />
-    <Setter Property="Opacity" Value="0.5" />
-</Style>
-
-<Style Selector="ScrollBar:vertical /template/ RepeatButton#PART_LineUpButton Path">
-    <Setter Property="Data" Value="M 0 4 L 4 0 L 8 4" /> <Setter Property="Stroke" Value="{DynamicResource TextSecondaryBrush}" />
-    <Setter Property="StrokeThickness" Value="1" />
-    <Setter Property="Fill" Value="Transparent" />
-</Style>
-
-<Style Selector="ScrollBar:vertical /template/ RepeatButton#PART_LineDownButton Path">
-    <Setter Property="Data" Value="M 0 0 L 4 4 L 8 0" /> <Setter Property="Stroke" Value="{DynamicResource TextSecondaryBrush}" />
-    <Setter Property="StrokeThickness" Value="1" />
-    <Setter Property="Fill" Value="Transparent" />
-</Style>
-
-<Style Selector="ScrollBar:vertical:pointerover /template/ Thumb">
-    <Setter Property="Width" Value="6" /> <Setter Property="Background" Value="#99FFFFFF" />
-</Style>
-
-<Style Selector="ScrollBar /template/ RepeatButton:pointerover">
-    <Setter Property="Opacity" Value="1" />
-</Style>
 
 </Styles>
